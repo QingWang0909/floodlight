@@ -35,35 +35,38 @@ public class DHCPBinding {
 	public IPv4Address getIPv4Address() {
 		return IP;
 	}
-	
 	public MacAddress getMACAddress() {
 		return MAC;
 	}
-	
+
+
 	private void setIPv4Addresss(IPv4Address ip) {
 		IP = ip; 
 	}
-	
 	public void setMACAddress(MacAddress mac) {
 		MAC = mac;
 	}
-	
-	public boolean isActiveLease() {
-		return LEASE_STATUS;
-	}
-	
-	public void setStaticIPLease(boolean staticIP) {
+	public void setPermanentLease(boolean staticIP) {
 		PERMANENT_LEASE = staticIP;
 	}
-	
-	public boolean isStaticIPLease() {
+	public void setLeaseStatus(boolean status) { LEASE_STATUS = status; }
+	public void setLeaseStartTimeSeconds() {
+		LEASE_START_TIME_SECONDS = System.currentTimeMillis() / 1000;
+	}
+	public void setLeaseDurationSeconds(long time) {
+		LEASE_DURATION_SECONDS = time;
+	}
+
+
+	public boolean isLeasePermanent() {
 		return PERMANENT_LEASE;
 	}
-	
-	public void setLeaseStatus(boolean status) {
-		LEASE_STATUS = status;
+
+	public boolean isLeaseAvailable() {
+		if (LEASE_STATUS == false) return true;
+		else return false;
 	}
-	
+
 	public boolean isLeaseExpired() {
 		long currentTime = System.currentTimeMillis();
 		if ((currentTime / 1000) >= (LEASE_START_TIME_SECONDS + LEASE_DURATION_SECONDS)) {
@@ -71,14 +74,6 @@ public class DHCPBinding {
 		} else {
 			return false;
 		}
-	}
-	
-	protected void setLeaseStartTimeSeconds() {
-		LEASE_START_TIME_SECONDS = System.currentTimeMillis() / 1000;
-	}
-	
-	protected void setLeaseDurationSeconds(long time) {
-		LEASE_DURATION_SECONDS = time;
 	}
 	
 	protected void clearLeaseTimes() {
@@ -137,5 +132,17 @@ public class DHCPBinding {
 		if (PERMANENT_LEASE != other.PERMANENT_LEASE)
 			return false;
 		return true;
+	}
+
+	@Override
+	public String toString() {
+		return "DHCPBinding{" +
+				"MAC=" + MAC +
+				", IP=" + IP +
+				", LEASE_STATUS=" + LEASE_STATUS +
+				", PERMANENT_LEASE=" + PERMANENT_LEASE +
+				", LEASE_START_TIME_SECONDS=" + LEASE_START_TIME_SECONDS +
+				", LEASE_DURATION_SECONDS=" + LEASE_DURATION_SECONDS +
+				'}';
 	}
 }

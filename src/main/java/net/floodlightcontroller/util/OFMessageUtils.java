@@ -17,7 +17,7 @@ import org.projectfloodlight.openflow.types.OFPort;
 
 /**
  * Tools to help work with OFMessages.
- * 
+ *
  * Compare OFMessage-extending objects (e.g. OFFlowMod, OFPacketIn)
  * where the XID does not matter. This is especially useful for
  * unit testing where the XID of the OFMessage might vary whereas
@@ -32,16 +32,16 @@ public class OFMessageUtils {
 	 * Prevent instantiation
 	 */
 	private OFMessageUtils() {};
-	
+
 	/**
 	 * Returns true if each object is deeply-equal in the same manner that
 	 * Object's equals() does with the exception of the XID field, which is
 	 * ignored; otherwise, returns false.
-	 * 
+	 *
 	 * NOTE: This function is VERY INEFFICIENT and creates a new OFMessage
 	 * object in order to the the comparison minus the XID. It is advised
 	 * that you use it sparingly and ideally only within unit tests.
-	 * 
+	 *
 	 * @param a; object A to compare
 	 * @param b; object B to compare
 	 * @return true if A and B are deeply-equal; false otherwise
@@ -50,10 +50,10 @@ public class OFMessageUtils {
 		OFMessage.Builder mb = b.createBuilder().setXid(a.getXid());
 		return a.equals(mb.build());
 	}
-	
+
 	/**
 	 * Writes an OFPacketOut message to a switch.
-	 * 
+	 *
 	 * @param sw
 	 *            The switch to write the PacketOut to.
 	 * @param packetInMessage
@@ -63,7 +63,7 @@ public class OFMessageUtils {
 	 */
 	public static void writePacketOutForPacketIn(IOFSwitch sw,
 			OFPacketIn packetInMessage, OFPort egressPort) {
-		
+
 		OFPacketOut.Builder pob = sw.getOFFactory().buildPacketOut();
 
 		// Set buffer_id, in_port, actions_len
