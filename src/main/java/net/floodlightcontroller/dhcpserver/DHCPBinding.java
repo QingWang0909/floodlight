@@ -46,7 +46,7 @@ public class DHCPBinding {
 	public void setMACAddress(MacAddress mac) {
 		MAC = mac;
 	}
-	public void setPermanentLease(boolean staticIP) {
+	public void setLeasePermanent(boolean staticIP) {
 		PERMANENT_LEASE = staticIP;
 	}
 	public void setLeaseStatus(boolean status) { LEASE_STATUS = status; }
@@ -58,9 +58,7 @@ public class DHCPBinding {
 	}
 
 
-	public boolean isLeasePermanent() {
-		return PERMANENT_LEASE;
-	}
+	public boolean isPermanentLease() { return PERMANENT_LEASE; }
 
 	public boolean isLeaseAvailable() {
 		if (LEASE_STATUS == false) return true;
@@ -76,11 +74,11 @@ public class DHCPBinding {
 		}
 	}
 	
-	protected void clearLeaseTimes() {
+	private void clearLeaseTimes() {
 		LEASE_START_TIME_SECONDS = 0;
 		LEASE_DURATION_SECONDS = 0;
 	}
-	
+
 	protected boolean cancelLease() {
 		this.clearLeaseTimes();
 		this.setLeaseStatus(false);

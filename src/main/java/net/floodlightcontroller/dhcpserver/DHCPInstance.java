@@ -219,7 +219,7 @@ public class DHCPInstance {
             this.leaseTimeSec = timeSec;
             return this;
         }
-
+/*
         public DHCPInstanceBuilder setRebindTimeSec(int timeSec){
             if(timeSec < 0){
                 throw  new IllegalArgumentException("Build DHCP instance failed : DHCP server rebind time can not be less than 0");
@@ -237,7 +237,7 @@ public class DHCPInstance {
             this.renewalTimeSec = timeSec;
             return this;
         }
-
+*/
 
         public DHCPInstanceBuilder setDNSServers(List<IPv4Address> dnsServers) {
             if(dnsServers == null){
@@ -311,7 +311,7 @@ public class DHCPInstance {
         }
 
         public DHCPInstance build() {
-            if(startIPAddress.compareTo(endIPAddress) >= 0){
+            if (startIPAddress.compareTo(endIPAddress) >= 0) {
                 throw new IllegalArgumentException("Build DHCP instance failed : Starter IP must be less than Stopper IP in order to create a DHCP pool");
             }
 
@@ -319,24 +319,26 @@ public class DHCPInstance {
             this.renewalTimeSec = (int)(leaseTimeSec * 0.5);
             this.dhcpPool = new DHCPPool(startIPAddress, endIPAddress.getInt()-startIPAddress.getInt()+1);
 
-            if(this.dnsServers == null){
+            if (this.dnsServers == null) {
                 this.dnsServers = new ArrayList<IPv4Address>();
             }
-            if(this.ntpServers == null){
+            if (this.ntpServers == null) {
                 this.ntpServers = new ArrayList<IPv4Address>();
             }
-            if(this.clientMembers == null){
+            if (this.clientMembers == null) {
                 this.clientMembers = new HashSet<MacAddress>();
             }
-            if(this.vlanMembers == null){
+            if (this.vlanMembers == null) {
                 this.vlanMembers = new HashSet<VlanVid>();
             }
-            if(this.nptMembers == null){
+            if (this.nptMembers == null) {
                 this.nptMembers = new HashSet<NodePortTuple>();
             }
 
-            for(Map.Entry<MacAddress, IPv4Address> entry : this.staticAddresseses.entrySet()) {
-                this.dhcpPool.configureFixedIPLease(entry.getValue(), entry.getKey());
+            if (this.staticAddresseses != null) {
+                for(Map.Entry<MacAddress, IPv4Address> entry : this.staticAddresseses.entrySet()) {
+                    this.dhcpPool.configureFixedIPLease(entry.getValue(), entry.getKey());
+                }
             }
 
             return new DHCPInstance(this);

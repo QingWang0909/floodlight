@@ -864,7 +864,6 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			log.error("Could not locate DHCP instance for DPID {}, port {}, VLAN {}", new Object[] {sw.getId(), inPort, vlanVid});
 		}
 		if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
-			log.info("DHCP Pool is full! Consider increasing the pool size.");
 			return Command.CONTINUE;
 		}
 
@@ -940,12 +939,11 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 							// with a REQUEST, at which point the ACK will set the least time to the DEFAULT
 							synchronized (dhcpInstance.getDHCPPool()) {
 								if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
-									log.info("DHCP Pool is full! Consider increasing the pool size.");
 									log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
 									return Command.CONTINUE;
 								}
 
-								DHCPBinding lease = dhcpInstance.getDHCPPool().getSpecificLease(desiredIPAddr, chaddr);
+								DHCPBinding lease = dhcpInstance.getDHCPPool().findLeaseBindingOfDesiredIP(desiredIPAddr, chaddr);
 								if (lease != null) {
 									log.debug("Checking new lease with specific IP");
 									dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
@@ -953,7 +951,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 									log.debug("Got new lease for " + yiaddr.toString());
 								} else {
 									log.debug("Checking new lease for any IP");
-									lease = dhcpInstance.getDHCPPool().getAnyAvailableLease(chaddr);
+									lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
 									dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
 									yiaddr = lease.getIPv4Address();
 									log.debug("Got new lease for " + yiaddr.toString());
@@ -1014,7 +1012,6 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 							boolean sendACK = true;
 							synchronized (dhcpInstance.getDHCPPool()) {
 								if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
-									log.info("DHCP Pool is full! Consider increasing the pool size.");
 									log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
 									return Command.CONTINUE;
 								}
@@ -1025,7 +1022,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 								if (desiredIPAddr != null) {
 									lease = dhcpInstance.getDHCPPool().getDHCPbindingFromIPv4(desiredIPAddr);
 								} else {
-									lease = dhcpInstance.getDHCPPool().getAnyAvailableLease(chaddr);
+									lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
 								}
 
 								// This IP is not in our allocation range
