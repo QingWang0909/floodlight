@@ -5,9 +5,12 @@ import net.floodlightcontroller.topology.NodePortTuple;
 import org.projectfloodlight.openflow.types.IPv4Address;
 import org.projectfloodlight.openflow.types.MacAddress;
 import org.projectfloodlight.openflow.types.VlanVid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.crypto.Mac;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The class representing a DHCP instance. One DHCP instance is responsible for managing one subnet.
@@ -17,6 +20,8 @@ import java.util.*;
  *
  */
 public class DHCPInstance {
+
+    protected static final Logger log = LoggerFactory.getLogger(DHCPInstance.class);
 
     private String name = null;
     private volatile DHCPPool dhcpPool = null;
@@ -69,6 +74,7 @@ public class DHCPInstance {
         return this.getDHCPPool().isIPv4BelongPool(ip);
     }
 
+
     private DHCPInstance(DHCPInstanceBuilder builder) {
         this.name = builder.name;
         this.dhcpPool = builder.dhcpPool;
@@ -118,7 +124,7 @@ public class DHCPInstance {
         private boolean ipforwarding;
         private String domainName;
 
-        private Map<MacAddress, IPv4Address> staticAddresseses;
+        private Map<MacAddress, IPv4Address> staticAddresseses = new ConcurrentHashMap<MacAddress, IPv4Address>();
         private Set<MacAddress> clientMembers;
         private Set<VlanVid> vlanMembers;
         private Set<NodePortTuple> nptMembers;
@@ -219,25 +225,6 @@ public class DHCPInstance {
             this.leaseTimeSec = timeSec;
             return this;
         }
-/*
-        public DHCPInstanceBuilder setRebindTimeSec(int timeSec){
-            if(timeSec < 0){
-                throw  new IllegalArgumentException("Build DHCP instance failed : DHCP server rebind time can not be less than 0");
-            }
-
-            this.rebindTimeSec = timeSec;
-            return this;
-        }
-
-        public DHCPInstanceBuilder setRenewalTimeSec(int timeSec){
-            if(timeSec < 0){
-                throw  new IllegalArgumentException("Build DHCP instance failed : DHCP server renewal time can not be less than 0");
-            }
-
-            this.renewalTimeSec = timeSec;
-            return this;
-        }
-*/
 
         public DHCPInstanceBuilder setDNSServers(List<IPv4Address> dnsServers) {
             if(dnsServers == null){
@@ -311,8 +298,16 @@ public class DHCPInstance {
         }
 
         public DHCPInstance build() {
+            if (startIPAddress == null || endIPAddress == null) {
+                throw new IllegalArgumentException("Build DHCP instance failed : starter IP address and end IP address can not be null");
+            }
+
             if (startIPAddress.compareTo(endIPAddress) >= 0) {
                 throw new IllegalArgumentException("Build DHCP instance failed : Starter IP must be less than Stopper IP in order to create a DHCP pool");
+            }
+
+            if (name == null) {
+                throw new IllegalArgumentException("Build DHCP instance failed : DHCP instance name can not be null");
             }
 
             this.rebindTimeSec = (int)(leaseTimeSec * 0.875);
@@ -337,7 +332,9 @@ public class DHCPInstance {
 
             if (this.staticAddresseses != null) {
                 for(Map.Entry<MacAddress, IPv4Address> entry : this.staticAddresseses.entrySet()) {
-                    this.dhcpPool.configureFixedIPLease(entry.getValue(), entry.getKey());
+                    if (!this.dhcpPool.configureFixedIPLease(entry.getValue(), entry.getKey())) {
+                        staticAddresseses.remove(entry.getKey());
+                    }
                 }
             }
 

@@ -66,6 +66,8 @@ public class DHCPBinding {
 	}
 
 	public boolean isLeaseExpired() {
+		if (PERMANENT_LEASE == true) return false;
+
 		long currentTime = System.currentTimeMillis();
 		if ((currentTime / 1000) >= (LEASE_START_TIME_SECONDS + LEASE_DURATION_SECONDS)) {
 			return true;

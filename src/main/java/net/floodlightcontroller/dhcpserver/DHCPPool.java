@@ -1,7 +1,9 @@
 package net.floodlightcontroller.dhcpserver;
 
 import java.util.ArrayList;
+import java.util.Objects;
 
+import net.floodlightcontroller.packet.DHCP;
 import net.floodlightcontroller.packet.IPv4;
 import org.projectfloodlight.openflow.types.IPv4Address;
 import org.projectfloodlight.openflow.types.MacAddress;
@@ -340,6 +342,7 @@ public class DHCPPool {
 			return true;
 
 		} else {
+			log.info("Failed to configure permanent DHCP binding with IP address {}, check if it is is a valid static address", ip, ip);
 			return false;
 
 		}

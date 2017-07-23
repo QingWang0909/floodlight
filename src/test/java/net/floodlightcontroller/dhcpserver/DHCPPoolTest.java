@@ -27,6 +27,10 @@ public class DHCPPoolTest extends FloodlightTestCase {
         return new DHCPPool(startIP, PoolSize);
     }
 
+
+    /**
+     * Test if dhcp pool can correctly track attributes in different states (i.e. pool is full, etc)
+     */
     @Test
     public void testDHCPPoolStatusMonitoring() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
@@ -73,6 +77,9 @@ public class DHCPPoolTest extends FloodlightTestCase {
     }
 
 
+    /**
+     * Test if we can get expected dhcp pool basic operations like add, remove
+     */
     @Test
     public void testDHCPPoolNormalOperation() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 5);
@@ -111,9 +118,11 @@ public class DHCPPoolTest extends FloodlightTestCase {
 
     }
 
-
+    /**
+     * Test if we get expected dhcp binding when a new client request happens
+     */
     @Test
-    public void testGetLeaseBinding() throws Exception {
+    public void testFindLeaseBinding() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 2);
 
         /* Same Mac should return same dhcp binding */
@@ -131,9 +140,11 @@ public class DHCPPoolTest extends FloodlightTestCase {
 
     }
 
-
+    /**
+     * Test if we get expected dhcp binding when client request a desired IP address
+     */
     @Test
-    public void testGetLeaseBindingOfDesiredIP() throws Exception {
+    public void testFindLeaseBindingOfDesiredIP() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
 
         /* Either Client Mac or Desired IP already registered as permanent lease */
@@ -159,6 +170,9 @@ public class DHCPPoolTest extends FloodlightTestCase {
     }
 
 
+    /**
+     * Test if we can get expected exception when trying to use setFixedLeaseBinding to lease a regular dhcp binding
+     */
     @Test(expected = UnsupportedOperationException.class)
     public void testSetLeaseBindingException() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
@@ -168,6 +182,10 @@ public class DHCPPoolTest extends FloodlightTestCase {
 
     }
 
+
+    /**
+     * Test if we can get expected exception when trying to use setLeaseBinding to lease a fixed dhcp binding
+     */
     @Test(expected = UnsupportedOperationException.class)
     public void testSetFixLeaseBinding() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
@@ -179,6 +197,9 @@ public class DHCPPoolTest extends FloodlightTestCase {
     }
 
 
+    /**
+     * Test if we can get expected result when trying to cancel an IP lease based on client Mac
+     */
     @Test
     public void testCancelLeaseOfMac() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
@@ -205,6 +226,9 @@ public class DHCPPoolTest extends FloodlightTestCase {
     }
 
 
+    /**
+     * Test if we can get expected result when trying to cancel an IP lease based on IP address
+     */
     @Test
     public void testCancelLeaseOfIP() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
@@ -232,31 +256,38 @@ public class DHCPPoolTest extends FloodlightTestCase {
     }
 
 
+    /**
+     * Test if we can get expected result when trying to make all expired leases available again
+     */
     @Test
     public void testClearExpiredLeases() throws Exception {
         dhcpPool = initDHCPPool(IPv4Address.of("192.168.1.1"), 3);
-//        dhcpPool.displayDHCPPool();
 
         /* Permanent lease should not be cleared */
         dhcpPool.configureFixedIPLease(IPv4Address.of("192.168.1.2"), MacAddress.of("22:33:44:55:66:77"));
         DHCPBinding lease = dhcpPool.findLeaseBinding(MacAddress.of("22:33:44:55:66:77"));
         dhcpPool.setFixedLeaseBinding(lease, MacAddress.of("22:33:44:55:66:77"));
         dhcpPool.cleanExpiredLeases();
-//        dhcpPool.displayDHCPPool();
+        assertTrue(lease.isPermanentLease());
+        assertFalse(lease.isLeaseAvailable());
+        assertFalse(lease.isLeaseExpired());
 
         /* Active-still lease should not be cleared */
         DHCPBinding lease1= dhcpPool.findLeaseBindingOfDesiredIP(IPv4Address.of("192.168.1.3"), MacAddress.of("00:11:22:33:44:55"));
         dhcpPool.setLeaseBinding(lease1, MacAddress.of("00:11:22:33:44:55"), 100L);
         dhcpPool.cleanExpiredLeases();
-//        dhcpPool.displayDHCPPool();
+        assertFalse(lease1.isLeaseExpired());
+        assertFalse(lease1.isLeaseAvailable());
+        assertFalse(lease1.isPermanentLease());
 
         /* Expired leases should be cleared */
         DHCPBinding lease2= dhcpPool.findLeaseBindingOfDesiredIP(IPv4Address.of("192.168.1.1"), MacAddress.of("55:44:33:22:11:00"));
-        dhcpPool.setLeaseBinding(lease1, MacAddress.of("55:44:33:22:11:00"), 3L);
-//        dhcpPool.displayDHCPPool();
-        TimeUnit.SECONDS.sleep(5L);
+        dhcpPool.setLeaseBinding(lease2, MacAddress.of("55:44:33:22:11:00"), 3L);
+        lease2.setLeaseDurationSeconds(0L);
         dhcpPool.cleanExpiredLeases();
-//        dhcpPool.displayDHCPPool();
+        assertTrue(lease2.isLeaseExpired());
+        assertTrue(lease2.isLeaseAvailable());
+        assertFalse(lease2.isPermanentLease());
 
     }
 

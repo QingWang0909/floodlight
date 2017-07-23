@@ -32,6 +32,10 @@ public class DHCPBindingTest extends FloodlightTestCase {
 
     }
 
+
+    /**
+     * Test if we can track the state that dhcp lease not expire
+     */
     @Test
     public void testLeaseNotExpired() throws Exception {
         binding.setLeaseStartTimeSeconds();
@@ -42,28 +46,27 @@ public class DHCPBindingTest extends FloodlightTestCase {
 
     }
 
+
+    /**
+     * Test if we can track the state that dhcp lease does expire
+     */
     @Test
     public void testLeaseDoesExpired() throws Exception {
         binding.setLeaseStartTimeSeconds();
-        binding.setLeaseDurationSeconds(1);
-
-        TimeUnit.SECONDS.sleep(5);
-        expectedLeaseExpired = true;
-        assertEquals(expectedLeaseExpired, binding.isLeaseExpired());
-
-    }
-
-    @Test
-    public void testClearLeaseTime() throws Exception {
-        binding.setLeaseStartTimeSeconds();
-        binding.setLeaseDurationSeconds(1000);
-        binding.cancelLease();
+        // set lease duration state
+        binding.setLeaseDurationSeconds(1L);
+        // set lease duration state back to 0 to mock the case that lease expire
+        binding.setLeaseDurationSeconds(0L);
 
         expectedLeaseExpired = true;
         assertEquals(expectedLeaseExpired, binding.isLeaseExpired());
 
     }
 
+
+    /**
+     * Test if we can track the state when trying to cancel a dhcp lease
+     */
     @Test
     public void testCancelLease() throws Exception {
         binding.setLeaseStartTimeSeconds();

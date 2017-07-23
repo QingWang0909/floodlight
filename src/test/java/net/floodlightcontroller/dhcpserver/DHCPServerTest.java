@@ -49,7 +49,6 @@ public class DHCPServerTest extends FloodlightTestCase {
     @Override
     @Before
     public void setUp() throws Exception {
-//        super.setUp();
 
         // Module loader setup
         cntx = new FloodlightContext();
