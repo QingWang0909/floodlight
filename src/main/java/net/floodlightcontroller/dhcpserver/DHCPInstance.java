@@ -266,6 +266,7 @@ public class DHCPInstance {
                 throw new IllegalArgumentException("BUild DHCP instance faild : DHCP static address can not be empty");
             }
 
+            // map structure naturally exclude same mac has multiple IP address entry
             this.staticAddresseses.put(mac, ip);
             return this;
         }
@@ -314,6 +315,7 @@ public class DHCPInstance {
             this.renewalTimeSec = (int)(leaseTimeSec * 0.5);
             this.dhcpPool = new DHCPPool(startIPAddress, endIPAddress.getInt()-startIPAddress.getInt()+1);
 
+            // fill in missing optional config parameters to empty instead of null
             if (this.dnsServers == null) {
                 this.dnsServers = new ArrayList<IPv4Address>();
             }
@@ -403,6 +405,8 @@ public class DHCPInstance {
                 ", broadcastIP=" + broadcastIP +
                 ", routerIP=" + routerIP +
                 ", subnetMask=" + subnetMask +
+                ", startIPAddress=" + startIPAddress +
+                ", endIPAddress=" + endIPAddress +
                 ", leaseTimeSec=" + leaseTimeSec +
                 ", rebindTimeSec=" + rebindTimeSec +
                 ", renewalTimeSec=" + renewalTimeSec +
@@ -410,7 +414,12 @@ public class DHCPInstance {
                 ", ntpServers=" + ntpServers +
                 ", ipforwarding=" + ipforwarding +
                 ", domainName='" + domainName + '\'' +
+                ", staticAddresseses=" + staticAddresseses +
+                ", clientMembers=" + clientMembers +
+                ", vlanMembers=" + vlanMembers +
+                ", nptMembers=" + nptMembers +
                 '}';
     }
+
 
 }

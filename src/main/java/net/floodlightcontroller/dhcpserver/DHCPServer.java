@@ -13,6 +13,8 @@ import org.projectfloodlight.openflow.protocol.OFVersion;
 import org.projectfloodlight.openflow.protocol.action.OFAction;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
 import org.projectfloodlight.openflow.types.*;
+import org.python.google.common.collect.Lists;
+import org.python.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,13 +168,17 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	@Override
 	public void startUp(FloodlightModuleContext context) {
 		floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
+		DHCPInstancesMap = new HashMap<String, DHCPInstance>();
 
-		// TODO: add VLAN etc from configure file to DHCP Instance
-		// Read our config options for the DHCP DHCPServer from floodlightdefault.properties file
+		//TODO: put instance to collection, then update test
+		/* Read config options from floodlightdefault.properties */
 		Map<String, String> configOptions = context.getConfigParams(this);
 		DHCPInstanceBuilder instanceBuilder = DHCPInstance.createBuilder();
+
+		// Read mandatory config parameters
 		try {
-			instanceBuilder.setSubnetMask(IPv4Address.of(configOptions.get("subnet-mask")))
+			instanceBuilder.setName(configOptions.get("name"))
+					.setSubnetMask(IPv4Address.of(configOptions.get("subnet-mask")))
 					.setStartIP(IPv4Address.of(configOptions.get("lower-ip-range")))
 					.setEndIP(IPv4Address.of(configOptions.get("upper-ip-range")))
 					.setBroadcastIP(IPv4Address.of(configOptions.get("broadcast-address")))
@@ -194,7 +200,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			throw ex;
 		}
 
-		// Any addresses that need to be set as static/fixed can be permanently added to the pool with a set MAC
+		// Read optional config parameters
 		String staticAddresses = configOptions.get("reserved-static-addresses");
 		if (staticAddresses != null) {
 			String[] macIpCouples = staticAddresses.split("\\s*;\\s*");
@@ -221,25 +227,62 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			}
 		}
 
-		// Separate the servers in the comma-delimited list
-		// otherwise the client will get incorrect option information
+
+		// Read Node-Port-Tuple config parameters
+		String nptes = configOptions.get("node-port-tuple");
+		if (nptes != null) {
+			String[] nptCouples = nptes.split("\\s*;\\s*");
+
+			String[] nodeportSplit;
+			int i, nodePos, portPos;
+			List<NodePortTuple> nptMembers = new ArrayList<NodePortTuple>();
+			for (i = 0; i < nptCouples.length; i++) {
+				nodeportSplit = nptCouples[i].split("\\s*,\\s*");
+				// determine which element is sw ID and which is the port number
+				if (nodeportSplit[0].length() > nodeportSplit[1].length()) {
+					nodePos = 0;
+					portPos = 1;
+				}else {
+					nodePos = 1;
+					portPos = 0;
+				}
+				nptMembers.add(new NodePortTuple(DatapathId.of(nodeportSplit[nodePos]), OFPort.of(Integer.valueOf(nodeportSplit[portPos]))));
+			}
+
+			instanceBuilder.setNptMembers(new HashSet<NodePortTuple>(nptMembers));
+
+		}
+
+
+		// Separate the servers in the comma-delimited list, O.W client will get incorrect option information
 		String dnses = configOptions.get("domain-name-servers");
-		if(dnses != null){
+		if (dnses != null) {
 			List<IPv4Address> dnsServerIPs = new ArrayList<IPv4Address>();
-			for(String dnsServerIP : dnses.split("\\s*,\\s*")){
+			for (String dnsServerIP : dnses.split("\\s*,\\s*")) {
 				dnsServerIPs.add(IPv4Address.of(dnsServerIP));
 			}
 			instanceBuilder.setDNSServers(dnsServerIPs);
 		}
 
 		String ntps = configOptions.get("ntp-servers");
-		if(ntps != null){
+		if (ntps != null) {
 			List<IPv4Address> ntpServerIPs = new ArrayList<IPv4Address>();
-			for(String ntpServerIP : ntps.split("\\s*,\\s*")){
+			for (String ntpServerIP : ntps.split("\\s*,\\s*")) {
 				ntpServerIPs.add(IPv4Address.of(ntpServerIP));
 			}
 			instanceBuilder.setNTPServers(ntpServerIPs);
 		}
+
+		// Separate VLAN IDs in the comma-delimited list, then convert to set
+		String vlanvids = configOptions.get("vlanvid");
+		if (vlanvids != null) {
+			List<VlanVid> vlanMembers = new ArrayList<VlanVid>();
+			for (String vlanvid : vlanvids.split("\\s*,\\s*")) {
+				vlanMembers.add(VlanVid.ofVlan(Integer.valueOf(vlanvid)));
+			}
+			instanceBuilder.setVlanMembers(new HashSet<VlanVid>(vlanMembers));
+		}
+
 
 		DHCPInstance dhcpInstance = instanceBuilder.build();
 		DHCPInstancesMap.put(dhcpInstance.getName(), dhcpInstance);
@@ -294,6 +337,81 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	}
 
 
+	/**  * (1) DHCP Discover
+	 * -- UDP src port = 68
+	 * -- UDP dst port = 67
+	 * -- IP src addr = 0.0.0.0
+	 * -- IP dst addr = 255.255.255.255
+	 * -- Opcode = 0x01
+	 * -- XID = transactionX
+	 * -- All addresses blank:
+	 * --	ciaddr (client IP)
+	 * --	yiaddr (your IP)
+	 * --	siaddr (DHCPServer IP)
+	 * --	giaddr (GW IP)
+	 * -- chaddr = Client's MAC
+	 * -- Options:
+	 * --	Option 53 = DHCP Discover
+	 * --	Option 50 = possible IP request
+	 * --	Option 55 = parameter request list
+	 * --		(1)  SN Mask
+	 * --		(3)  Router
+	 * --		(15) Domain Name
+	 * --		(6)  DNS
+	 **/
+	private boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address IPv4SrcAddr, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
+		int xid;
+		IPv4Address yiaddr;
+		IPv4Address giaddr;
+		MacAddress chaddr;
+		ArrayList<Byte> requestOrder;/* DHCP Header Info */
+		xid = DHCPPayload.getTransactionId();
+		yiaddr = DHCPPayload.getYourIPAddress();
+		giaddr = DHCPPayload.getGatewayIPAddress();   // Will have GW IP if a relay agent was used
+		chaddr = DHCPPayload.getClientHardwareAddress();
+
+		List<DHCPOption> options = DHCPPayload.getOptions();
+		requestOrder = new ArrayList<Byte>();
+		for (DHCPOption option : options) {
+			if (option.getCode() == DHCPOptionCode.OptionCode_RequestedIP.getValue()) {
+				desiredIPAddr = IPv4Address.of(option.getData());
+				log.debug("Got requested IP");
+			} else if (option.getCode() == DHCPOptionCode.OptionCode_RequestedParameters.getValue()) {
+				log.debug("Got requested param list");
+				requestOrder = getRequestedParameters(DHCPPayload, false);
+			}
+
+		}
+
+		// Process DISCOVER message and prepare an OFFER with minimum-hold lease
+		// A HOLD lease should be a small amount of time sufficient for the client to respond
+		// with a REQUEST, at which point the ACK will set the least time to the DEFAULT
+		synchronized (dhcpInstance.getDHCPPool()) {
+			if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
+				log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
+				return true;
+			}
+
+			DHCPBinding lease = dhcpInstance.getDHCPPool().findLeaseBindingOfDesiredIP(desiredIPAddr, chaddr);
+			if (lease != null) {
+				log.debug("Checking new lease with specific IP");
+				dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
+				yiaddr = lease.getIPv4Address();
+				log.debug("Got new lease for " + yiaddr.toString());
+			} else {
+				log.debug("Checking new lease for any IP");
+				lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
+				dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
+				yiaddr = lease.getIPv4Address();
+				log.debug("Got new lease for " + yiaddr.toString());
+			}
+		}
+
+		sendDHCPOffer(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+		return false;
+
+	}
+
 	/** (2) DHCP Offer Message
 	 * -- UDP src port = 67
 	 * -- UDP dst port = 68
@@ -314,8 +432,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --	Option 54 = DHCP DHCPServer IP
 	 * --	Option 6 = DNS servers
 	 **/
-	public void sendDHCPOfferMsg(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
-								 IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+	public void sendDHCPOffer(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
+							  IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 
 		OFPacketOut.Builder DHCPOfferPacket = sw.getOFFactory().buildPacketOut();
 		DHCPOfferPacket.setBufferId(OFBufferId.NO_BUFFER);
@@ -339,7 +457,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		udpDHCPOffer.setDestinationPort(UDP.DHCP_CLIENT_PORT);
 		udpDHCPOffer.setSourcePort(UDP.DHCP_SERVER_PORT);
 
-		DHCP dhcpDHCPOffer = setDHCPOfferMsg(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
+		DHCP dhcpDHCPOffer = setDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
 
 		ethDHCPOffer.setPayload(ipv4DHCPOffer.setPayload(udpDHCPOffer.setPayload(dhcpDHCPOffer)));
 		DHCPOfferPacket.setInPort(OFPort.ANY);
@@ -355,7 +473,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 	}
 
-	private DHCP setDHCPOfferMsg(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+
+	private DHCP setDHCPOfferMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 		DHCP dhcpDHCPOffer = new DHCP();
 		dhcpDHCPOffer.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
 		dhcpDHCPOffer.setHardwareType((byte) 1);
@@ -456,6 +575,114 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	}
 
 
+
+	/** (3) DHCP Request
+	 * -- UDP src port = 68
+	 * -- UDP dst port = 67
+	 * -- IP src addr = 0.0.0.0
+	 * -- IP dst addr = 255.255.255.255
+	 * -- Opcode = 0x01
+	 * -- XID = transactionX
+	 * -- ciaddr = blank
+	 * -- yiaddr = blank
+	 * -- siaddr = DHCP DHCPServer IP
+	 * -- giaddr = GW IP
+	 * -- chaddr = Client's MAC
+	 * -- Options:
+	 * --	Option 53 = DHCP Request
+	 * --	Option 50 = IP requested (from offer)
+	 * --	Option 54 = DHCP DHCPServer IP
+	 **/
+	private boolean handleDHCPRequest(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address IPv4SrcAddr, DHCP DHCPPayload, IPv4Address desiredIPAddr) {
+		int xid;
+		IPv4Address yiaddr;
+		IPv4Address giaddr;
+		MacAddress chaddr;
+		ArrayList<Byte> requestOrder;
+		xid = DHCPPayload.getTransactionId();
+		yiaddr = DHCPPayload.getYourIPAddress();
+		giaddr = DHCPPayload.getGatewayIPAddress();
+		chaddr = DHCPPayload.getClientHardwareAddress();
+
+		List<DHCPOption> options = DHCPPayload.getOptions();
+		requestOrder = new ArrayList<Byte>();
+		for (DHCPOption option : options) {
+			if (option.getCode() == DHCPOptionCode.OptionCode_RequestedIP.getValue()) {
+				desiredIPAddr = IPv4Address.of(option.getData());
+				if (!desiredIPAddr.equals(dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(chaddr).getIPv4Address())) {
+					// This client wants a different IP than what we have on file, so cancel its HOLD lease now (if we have one)
+					dhcpInstance.getDHCPPool().cancelLeaseOfMAC(chaddr);
+					return true;
+				}
+			} else if (option.getCode() == DHCPOptionCode.OptionCode_DHCPServerIp.getValue()) {
+				if (!IPv4Address.of(option.getData()).equals(dhcpInstance.getServerIP())) {
+					// We're not the DHCPServer the client wants to use, so cancel its HOLD lease now and ignore the client
+					dhcpInstance.getDHCPPool().cancelLeaseOfMAC(chaddr);
+					return true;
+				}
+			} else if (option.getCode() == DHCPOptionCode.OptionCode_RequestedParameters.getValue()) {
+				requestOrder = getRequestedParameters(DHCPPayload, false);
+			}
+
+		}
+
+		// Process REQUEST message and prepare an ACK with default lease time
+		// This extends the hold lease time to that of a normal lease
+		boolean sendACK = true;
+		synchronized (dhcpInstance.getDHCPPool()) {
+			if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
+				log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
+				return true;
+			}
+
+			DHCPBinding lease;
+
+			// Get any binding, in use now or not
+			if (desiredIPAddr != null) {
+				lease = dhcpInstance.getDHCPPool().getDHCPbindingFromIPv4(desiredIPAddr);
+			} else {
+				lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
+			}
+
+			// This IP is not in our allocation range
+			if (lease == null) {
+				log.info("The IP " + desiredIPAddr.toString() + " is not in the range "
+						+ dhcpInstance.getStartIPAddress().toString() + " to " + dhcpInstance.getEndIPAddress().toString());
+				log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
+				sendACK = false;
+				// Determine if the IP in the binding we just retrieved is okay to allocate to the MAC requesting it
+			} else if (!lease.getMACAddress().equals(chaddr) && lease.isLeaseAvailable()) {
+				log.debug("Tried to REQUEST an IP that is currently assigned to another MAC");
+				log.debug("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
+				sendACK = false;
+				// Check if we want to renew the MAC's current lease
+			} else if (lease.getMACAddress().equals(chaddr) && lease.isLeaseAvailable()) {
+				log.debug("Renewing lease for MAC " + chaddr.toString());
+				dhcpInstance.getDHCPPool().renewLease(lease.getIPv4Address(), dhcpInstance.getLeaseTimeSec());
+				yiaddr = lease.getIPv4Address();
+				log.debug("Finalized renewed lease for " + yiaddr.toString());
+				// Check if we want to create a new lease for the MAC
+			} else if (!lease.isLeaseAvailable()){
+				log.debug("Assigning new lease for MAC " + chaddr.toString());
+				dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
+				yiaddr = lease.getIPv4Address();
+				log.debug("Finalized new lease for " + yiaddr.toString());
+			} else {
+				log.debug("Don't know how we got here");
+				return true;
+			}
+
+		}
+
+		if (sendACK) {
+			sendDHCPAck(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+		} else {
+			sendDHCPNack(dhcpInstance, sw, inPort, chaddr, giaddr, xid);
+		}
+		return false;
+	}
+
+
 	/** (4) DHCP ACK Message
 	 * -- UDP src port = 67
 	 * -- UDP dst port = 68
@@ -476,8 +703,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --	Option 54 = DHCP DHCPServer IP
 	 * --	Option 6 = DNS servers
 	 **/
-	public void sendDHCPAckMsg(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
-							   IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+	public void sendDHCPAck(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
+							IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 		OFPacketOut.Builder DHCPACKPacket = sw.getOFFactory().buildPacketOut();
 		DHCPACKPacket.setBufferId(OFBufferId.NO_BUFFER);
 
@@ -500,7 +727,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		udpDHCPAck.setDestinationPort(UDP.DHCP_CLIENT_PORT);
 		udpDHCPAck.setSourcePort(UDP.DHCP_SERVER_PORT);
 
-		DHCP dhcpDHCPAck = setDHCPAckMsg(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
+		DHCP dhcpDHCPAck = setDHCPAckMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
 		ethDHCPAck.setPayload(ipv4DHCPAck.setPayload(udpDHCPAck.setPayload(dhcpDHCPAck)));
 		DHCPACKPacket.setInPort(OFPort.ANY);
 
@@ -512,10 +739,11 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 		log.debug("Sending DHCP ACK");
 		sw.write(DHCPACKPacket.build());
+
 	}
 
 
-	private DHCP setDHCPAckMsg(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+	private DHCP setDHCPAckMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 		DHCP dhcpDHCPAck = new DHCP();
 		dhcpDHCPAck.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
 		dhcpDHCPAck.setHardwareType((byte) 1);
@@ -616,7 +844,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		return dhcpDHCPAck;
 	}
 
-	public void sendDHCPNackMsg(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address giaddr, int xid) {
+
+	public void sendDHCPNack(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address giaddr, int xid) {
 		OFPacketOut.Builder DHCPOfferPacket = sw.getOFFactory().buildPacketOut();
 		DHCPOfferPacket.setBufferId(OFBufferId.NO_BUFFER);
 
@@ -635,7 +864,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		udpDHCPOffer.setDestinationPort(UDP.DHCP_CLIENT_PORT);
 		udpDHCPOffer.setSourcePort(UDP.DHCP_SERVER_PORT);
 
-		DHCP dhcpNACK = getDHCPNAckMsg(instance, chaddr, giaddr, xid);
+		DHCP dhcpNACK = getDHCPNAckMessage(instance, chaddr, giaddr, xid);
 		ethDHCPOffer.setPayload(ipv4DHCPOffer.setPayload(udpDHCPOffer.setPayload(dhcpNACK)));
 		DHCPOfferPacket.setInPort(OFPort.ANY);
 
@@ -648,7 +877,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		sw.write(DHCPOfferPacket.build());
 	}
 
-	private DHCP getDHCPNAckMsg(DHCPInstance instance, MacAddress chaddr, IPv4Address giaddr, int xid) {
+	private DHCP getDHCPNAckMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address giaddr, int xid) {
 		DHCP dhcpDHCPOffer = new DHCP();
 		dhcpDHCPOffer.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
 		dhcpDHCPOffer.setHardwareType((byte) 1);
@@ -686,6 +915,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		dhcpDHCPOffer.setOptions(dhcpOfferOptions);
 		return dhcpDHCPOffer;
 	}
+
 
 	public ArrayList<Byte> getRequestedParameters(DHCP DHCPPayload, boolean isInform) {
 		ArrayList<Byte> requestOrder = new ArrayList<Byte>();
@@ -837,14 +1067,13 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	@Override
 	public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) {
 
-		/* Check DHCP Service enabled or not */
-		if (!isDHCPEnabled()) { return Command.CONTINUE; }
-
-
-		/* Get DHCP Instance based on Packet-In message */
 		Ethernet eth = IFloodlightProviderService.bcStore.get(cntx, IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-		OFPacketIn pi = (OFPacketIn) msg;
 
+		if (!isDHCPEnabled()) { return Command.CONTINUE; }
+		if (!dhcpPacketIn(eth)) { return Command.CONTINUE; }
+
+		/* Get dhcp instance based on Packet-In message */
+		OFPacketIn pi = (OFPacketIn) msg;
 		OFPort inPort = pi.getVersion().compareTo(OFVersion.OF_12) < 0 ? pi.getInPort() : pi.getMatch().get(MatchField.IN_PORT);
 
 		VlanVid vlanVid = null;
@@ -862,274 +1091,125 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		}
 		if (dhcpInstance == null) {
 			log.error("Could not locate DHCP instance for DPID {}, port {}, VLAN {}", new Object[] {sw.getId(), inPort, vlanVid});
+			return Command.CONTINUE;
 		}
 		if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
 			return Command.CONTINUE;
 		}
 
+		/* start dhcp message processing */
+		int xid = 0;
+		IPv4Address yiaddr = IPv4Address.NONE;
+		IPv4Address giaddr = IPv4Address.NONE;
+		IPv4Address desiredIPAddr = null;
+		MacAddress chaddr = null;
+		ArrayList<Byte> requestOrder;
 
-		/* DHCP Instance begin to handle DHCP Messages */
-		if (eth.getEtherType() == EthType.IPv4) { 				/* shallow compare is okay for EthType */
-			log.debug("Got IPv4 Packet");
+		IPv4 IPv4Payload = (IPv4) eth.getPayload();
+		IPv4Address IPv4SrcAddr = IPv4Payload.getSourceAddress();
+		log.debug("Got IPv4 Packet");
+		UDP UDPPayload = (UDP) IPv4Payload.getPayload();
+		log.debug("Got UDP Packet");
+		DHCP DHCPPayload = (DHCP) UDPPayload.getPayload();
+		log.debug("Got DHCP Packet");
 
-			IPv4 IPv4Payload = (IPv4) eth.getPayload();
-			IPv4Address IPv4SrcAddr = IPv4Payload.getSourceAddress();
-			if (IPv4Payload.getProtocol() == IpProtocol.UDP) {  /* shallow compare also okay for IpProtocol */
-				log.debug("Got UDP Packet");
-				UDP UDPPayload = (UDP) IPv4Payload.getPayload();
+		if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Request.getValue()) {
+			if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_DISCOVER)) {
+				log.debug("DHCP DISCOVER Message Received");
+				if (handleDHCPDiscover(sw, inPort, dhcpInstance, IPv4SrcAddr, desiredIPAddr, DHCPPayload))
+					return Command.CONTINUE;
 
-				if (isDHCPPacket(UDPPayload)) {					/* TransportPort must be deep though */
-					log.debug("Got DHCP Packet");
-					DHCP DHCPPayload = (DHCP) UDPPayload.getPayload();
+			}
 
-					/* DHCP Header */
-					int xid = 0;
-					IPv4Address yiaddr = IPv4Address.NONE;
-					IPv4Address giaddr = IPv4Address.NONE;
-					IPv4Address desiredIPAddr = null;
-					MacAddress chaddr = null;
-					ArrayList<Byte> requestOrder;
-					if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Request.getValue()) {
-						/**  * (1) DHCP Discover
-						 * -- UDP src port = 68
-						 * -- UDP dst port = 67
-						 * -- IP src addr = 0.0.0.0
-						 * -- IP dst addr = 255.255.255.255
-						 * -- Opcode = 0x01
-						 * -- XID = transactionX
-						 * -- All addresses blank:
-						 * --	ciaddr (client IP)
-						 * --	yiaddr (your IP)
-						 * --	siaddr (DHCPServer IP)
-						 * --	giaddr (GW IP)
-						 * -- chaddr = Client's MAC
-						 * -- Options:
-						 * --	Option 53 = DHCP Discover
-						 * --	Option 50 = possible IP request
-						 * --	Option 55 = parameter request list
-						 * --		(1)  SN Mask
-						 * --		(3)  Router
-						 * --		(15) Domain Name
-						 * --		(6)  DNS
-						 **/
-						if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_DISCOVER)) {
-							log.debug("DHCP DISCOVER Message Received");
+			else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_REQUEST)) {
+				log.debug("DHCP REQUEST received");
+				if (handleDHCPRequest(sw, inPort, dhcpInstance, IPv4SrcAddr, DHCPPayload, desiredIPAddr))
+					return Command.CONTINUE;
 
-							/* DHCP Header Info */
-							xid = DHCPPayload.getTransactionId();
-							yiaddr = DHCPPayload.getYourIPAddress();
-							giaddr = DHCPPayload.getGatewayIPAddress();   // Will have GW IP if a relay agent was used
-							chaddr = DHCPPayload.getClientHardwareAddress();
+			}
 
-							List<DHCPOption> options = DHCPPayload.getOptions();
-							requestOrder = new ArrayList<Byte>();
-							for (DHCPOption option : options) {
-								if (option.getCode() == DHCPOptionCode.OptionCode_RequestedIP.getValue()) {
-									desiredIPAddr = IPv4Address.of(option.getData());
-									log.debug("Got requested IP");
-								} else if (option.getCode() == DHCPOptionCode.OptionCode_RequestedParameters.getValue()) {
-									log.debug("Got requested param list");
-									requestOrder = getRequestedParameters(DHCPPayload, false); 		
-								}
+			else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_RELEASE)) {
+				if (DHCPPayload.getServerIPAddress() != dhcpInstance.getServerIP()) {
+					log.info("DHCP RELEASE message not for our DHCP server");
+					// Send the packet out the port it would normally go out via the Forwarding module
+					// Execution jumps to return Command.CONTINUE at end of receive()
 
-							}
-
-							// Process DISCOVER message and prepare an OFFER with minimum-hold lease
-							// A HOLD lease should be a small amount of time sufficient for the client to respond
-							// with a REQUEST, at which point the ACK will set the least time to the DEFAULT
-							synchronized (dhcpInstance.getDHCPPool()) {
-								if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
-									log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
-									return Command.CONTINUE;
-								}
-
-								DHCPBinding lease = dhcpInstance.getDHCPPool().findLeaseBindingOfDesiredIP(desiredIPAddr, chaddr);
-								if (lease != null) {
-									log.debug("Checking new lease with specific IP");
-									dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
-									yiaddr = lease.getIPv4Address();
-									log.debug("Got new lease for " + yiaddr.toString());
-								} else {
-									log.debug("Checking new lease for any IP");
-									lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
-									dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
-									yiaddr = lease.getIPv4Address();
-									log.debug("Got new lease for " + yiaddr.toString());
-								}
-							}
-
-							sendDHCPOfferMsg(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
-
-						} // END IF DISCOVER
-						else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_REQUEST)) {
-							log.debug(": DHCP REQUEST received");
-							/** (3) DHCP Request
-							 * -- UDP src port = 68
-							 * -- UDP dst port = 67
-							 * -- IP src addr = 0.0.0.0
-							 * -- IP dst addr = 255.255.255.255
-							 * -- Opcode = 0x01
-							 * -- XID = transactionX
-							 * -- ciaddr = blank
-							 * -- yiaddr = blank
-							 * -- siaddr = DHCP DHCPServer IP
-							 * -- giaddr = GW IP
-							 * -- chaddr = Client's MAC
-							 * -- Options:
-							 * --	Option 53 = DHCP Request
-							 * --	Option 50 = IP requested (from offer)
-							 * --	Option 54 = DHCP DHCPServer IP
-							 **/
-							xid = DHCPPayload.getTransactionId();
-							yiaddr = DHCPPayload.getYourIPAddress();
-							giaddr = DHCPPayload.getGatewayIPAddress();
-							chaddr = DHCPPayload.getClientHardwareAddress();
-
-							List<DHCPOption> options = DHCPPayload.getOptions();
-							requestOrder = new ArrayList<Byte>();
-							for (DHCPOption option : options) {
-								if (option.getCode() == DHCPOptionCode.OptionCode_RequestedIP.getValue()) {
-									desiredIPAddr = IPv4Address.of(option.getData());
-									if (!desiredIPAddr.equals(dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(chaddr).getIPv4Address())) {
-										// This client wants a different IP than what we have on file, so cancel its HOLD lease now (if we have one)
-										dhcpInstance.getDHCPPool().cancelLeaseOfMAC(chaddr);
-										return Command.CONTINUE;
-									}
-								} else if (option.getCode() == DHCPOptionCode.OptionCode_DHCPServerIp.getValue()) {
-									if (!IPv4Address.of(option.getData()).equals(dhcpInstance.getServerIP())) {
-										// We're not the DHCPServer the client wants to use, so cancel its HOLD lease now and ignore the client
-										dhcpInstance.getDHCPPool().cancelLeaseOfMAC(chaddr);
-										return Command.CONTINUE;
-									}
-								} else if (option.getCode() == DHCPOptionCode.OptionCode_RequestedParameters.getValue()) {
-									requestOrder = getRequestedParameters(DHCPPayload, false);
-								}
-
-							}
-
-							// Process REQUEST message and prepare an ACK with default lease time
-							// This extends the hold lease time to that of a normal lease
-							boolean sendACK = true;
-							synchronized (dhcpInstance.getDHCPPool()) {
-								if (!dhcpInstance.getDHCPPool().hasAvailableSpace()) {
-									log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
-									return Command.CONTINUE;
-								}
-
-								DHCPBinding lease;
-
-								// Get any binding, in use now or not
-								if (desiredIPAddr != null) {
-									lease = dhcpInstance.getDHCPPool().getDHCPbindingFromIPv4(desiredIPAddr);
-								} else {
-									lease = dhcpInstance.getDHCPPool().findLeaseBinding(chaddr);
-								}
-
-								// This IP is not in our allocation range
-								if (lease == null) {
-									log.info("The IP " + desiredIPAddr.toString() + " is not in the range " 
-											+ dhcpInstance.getStartIPAddress().toString() + " to " + dhcpInstance.getEndIPAddress().toString());
-									log.info("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
-									sendACK = false;
-									// Determine if the IP in the binding we just retrieved is okay to allocate to the MAC requesting it
-								} else if (!lease.getMACAddress().equals(chaddr) && lease.isLeaseAvailable()) {
-									log.debug("Tried to REQUEST an IP that is currently assigned to another MAC");
-									log.debug("Device with MAC " + chaddr.toString() + " was not granted an IP lease");
-									sendACK = false;
-									// Check if we want to renew the MAC's current lease
-								} else if (lease.getMACAddress().equals(chaddr) && lease.isLeaseAvailable()) {
-									log.debug("Renewing lease for MAC " + chaddr.toString());
-									dhcpInstance.getDHCPPool().renewLease(lease.getIPv4Address(), dhcpInstance.getLeaseTimeSec());
-									yiaddr = lease.getIPv4Address();
-									log.debug("Finalized renewed lease for " + yiaddr.toString());
-									// Check if we want to create a new lease for the MAC
-								} else if (!lease.isLeaseAvailable()){
-									log.debug("Assigning new lease for MAC " + chaddr.toString());
-									dhcpInstance.getDHCPPool().setLeaseBinding(lease, chaddr, dhcpInstance.getLeaseTimeSec());
-									yiaddr = lease.getIPv4Address();
-									log.debug("Finalized new lease for " + yiaddr.toString());
-								} else {
-									log.debug("Don't know how we got here");
-									return Command.CONTINUE;
-								}
-
-							}
-
-							if (sendACK) {
-								sendDHCPAckMsg(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
-							} else {
-								sendDHCPNackMsg(dhcpInstance, sw, inPort, chaddr, giaddr, xid);
-							}
-
-						} // END IF REQUEST
-						else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_RELEASE)) {
-							if (DHCPPayload.getServerIPAddress() != dhcpInstance.getServerIP()) {
-								log.info("DHCP RELEASE message not for our DHCP server");
-								// Send the packet out the port it would normally go out via the Forwarding module
-								// Execution jumps to return Command.CONTINUE at end of receive()
-							} else {
-								log.debug("Got DHCP RELEASE. Cancelling remaining time on DHCP lease");
-								synchronized(dhcpInstance.getDHCPPool()) {
-									if (dhcpInstance.getDHCPPool().cancelLeaseOfMAC(DHCPPayload.getClientHardwareAddress())) {
-										log.info("Cancelled DHCP lease of " + DHCPPayload.getClientHardwareAddress().toString());
-										log.info("IP " + dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(DHCPPayload.getClientHardwareAddress()).getIPv4Address().toString()
-												+ " is now available in the DHCP address pool");
-									} else {
-										log.debug("Lease of " + DHCPPayload.getClientHardwareAddress().toString()
-												+ " was already inactive");
-									}
-								}
-
-							}
-						} // END IF RELEASE
-						else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_DECLINE)) {
-							log.debug("Got DHCP DECLINE. Cancelling HOLD time on DHCP lease");
-							synchronized(dhcpInstance.getDHCPPool()) {
-								if (dhcpInstance.getDHCPPool().cancelLeaseOfMAC(DHCPPayload.getClientHardwareAddress())) {
-									log.info("Cancelled DHCP lease of " + DHCPPayload.getClientHardwareAddress().toString());
-									log.info("IP " + dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(DHCPPayload.getClientHardwareAddress()).getIPv4Address().toString()
-											+ " is now available in the DHCP address pool");
-								} else {
-									log.info("HOLD Lease of " + DHCPPayload.getClientHardwareAddress().toString()
-											+ " has already expired");
-								}
-							}
-
-						} // END IF DECLINE
-						else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_INFORM)) {
-							log.debug("Got DHCP INFORM. Retreiving requested parameters from message");
-
-							xid = DHCPPayload.getTransactionId();
-							yiaddr = DHCPPayload.getYourIPAddress();
-							giaddr = DHCPPayload.getGatewayIPAddress();
-							chaddr = DHCPPayload.getClientHardwareAddress();
-
-							// Get the requests from the INFORM message. True for inform -- we don't want to include lease information
-							requestOrder = getRequestedParameters(DHCPPayload, true);
-							
-							// Process INFORM message and send an ACK with requested information
-							sendDHCPAckMsg(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
-
-						} // END IF INFORM
-
-					} // END IF DHCP OPCODE REQUEST 
-					else if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Reply.getValue()) {
-						// Do nothing right now. The DHCP DHCPServer isn't supposed to receive replies but ISSUE them instead
-						log.debug("Got an OFFER/ACK (REPLY)...this shouldn't happen unless there's another DHCP Server somewhere");
-
-					} else {
-						log.debug("Got DHCP packet, but not a known DHCP packet opcode");
-
+				} else {
+					log.debug("Got DHCP RELEASE. Cancelling remaining time on DHCP lease");
+					synchronized(dhcpInstance.getDHCPPool()) {
+						if (dhcpInstance.getDHCPPool().cancelLeaseOfMAC(DHCPPayload.getClientHardwareAddress())) {
+							log.info("Cancelled DHCP lease of " + DHCPPayload.getClientHardwareAddress().toString());
+							log.info("IP " + dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(DHCPPayload.getClientHardwareAddress()).getIPv4Address().toString()
+									+ " is now available in the DHCP address pool");
+						} else {
+							log.debug("Lease of " + DHCPPayload.getClientHardwareAddress().toString()
+									+ " was already inactive");
+						}
 					}
-				} // END IF DHCP packet
 
-			} // END IF UDP packet
+				}
+			} // END IF RELEASE
 
-		} // END IF IPv4 packet
+			else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_DECLINE)) {
+				log.debug("Got DHCP DECLINE. Cancelling HOLD time on DHCP lease");
+				synchronized(dhcpInstance.getDHCPPool()) {
+					if (dhcpInstance.getDHCPPool().cancelLeaseOfMAC(DHCPPayload.getClientHardwareAddress())) {
+						log.info("Cancelled DHCP lease of " + DHCPPayload.getClientHardwareAddress().toString());
+						log.info("IP " + dhcpInstance.getDHCPPool().getDHCPbindingFromMAC(DHCPPayload.getClientHardwareAddress()).getIPv4Address().toString()
+								+ " is now available in the DHCP address pool");
+					} else {
+						log.info("HOLD Lease of " + DHCPPayload.getClientHardwareAddress().toString()
+								+ " has already expired");
+					}
+				}
+
+			} // END IF DECLINE
+
+			else if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_INFORM)) {
+				log.debug("Got DHCP INFORM. Retreiving requested parameters from message");
+
+				xid = DHCPPayload.getTransactionId();
+				yiaddr = DHCPPayload.getYourIPAddress();
+				giaddr = DHCPPayload.getGatewayIPAddress();
+				chaddr = DHCPPayload.getClientHardwareAddress();
+
+				// Get the requests from the INFORM message. True for inform -- we don't want to include lease information
+				requestOrder = getRequestedParameters(DHCPPayload, true);
+
+				// Process INFORM message and send an ACK with requested information
+				sendDHCPAck(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+
+			} // END IF INFORM
+
+		} // END IF DHCP OPCODE REQUEST
+
+		else if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Reply.getValue()) {
+			// Do nothing right now. The DHCP DHCPServer isn't supposed to receive replies but ISSUE them instead
+			log.debug("Got an OFFER/ACK (REPLY)...this shouldn't happen unless there's another DHCP Server somewhere");
+
+		} else {
+			log.debug("Got DHCP packet, but not a known DHCP packet opcode");
+
+		}
 
 		return Command.CONTINUE;
 
-	} // END of receive(pkt)
+	}
+
+	private boolean dhcpPacketIn(Ethernet eth) {
+		if( eth.getEtherType() != EthType.IPv4 									// shallow compare is okay for EthType
+			|| ((IPv4) eth.getPayload()).getProtocol() != IpProtocol.UDP 		// shallow compare also okay for IpProtocol
+			|| !isDHCPPacket((UDP)((IPv4) eth.getPayload()).getPayload()))		// TransportPort must be deep though
+		{
+			return false;
+
+		}
+		else
+		{
+			return true;
+		}
+
+	}
 
 	private boolean isDHCPPacket(UDP UDPPayload) {
 		return (UDPPayload.getDestinationPort().equals(UDP.DHCP_SERVER_PORT)
