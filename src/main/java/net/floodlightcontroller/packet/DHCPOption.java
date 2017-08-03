@@ -17,6 +17,7 @@
 
 package net.floodlightcontroller.packet;
 
+import java.io.UnsupportedEncodingException;
 import java.util.Arrays;
 
 /**
@@ -112,7 +113,11 @@ public class DHCPOption {
      */
     @Override
     public String toString() {
-        return "DHCPOption [code=" + code + ", length=" + length + ", data="
-                + Arrays.toString(data) + "]";
+        return "DHCPOption{" +
+                "code=" + code +
+                ", length=" + length +
+                ", data=" + Arrays.toString(data) +
+                '}';
     }
+
 }

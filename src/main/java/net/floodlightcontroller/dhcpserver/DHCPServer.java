@@ -13,8 +13,6 @@ import org.projectfloodlight.openflow.protocol.OFVersion;
 import org.projectfloodlight.openflow.protocol.action.OFAction;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
 import org.projectfloodlight.openflow.types.*;
-import org.python.google.common.collect.Lists;
-import org.python.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -103,27 +101,6 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	private static long DHCP_SERVER_LEASE_POLICE_PATROL_PERIOD_SECONDS;
 	/** END CONFIG FILE VARIABLES **/
 
-	/**
-	 * DHCP messages are either:
-	 *		REQUEST (client --0x01--> server)
-	 *		or REPLY (server --0x02--> client)
-	 */
-	/* Qing Wang enum Code here */
-	public enum DHCPOpCode {
-		OpCode_Request		((byte)1),
-		OpCode_Reply		((byte)2);
-
-		protected byte value;
-
-		private DHCPOpCode(byte value) {
-			this.value = value;
-		}
-
-		public byte getValue(){
-			return value;
-		}
-
-	}
 
 	/**
 	 * DHCP REQUEST messages are either of type:
@@ -360,18 +337,15 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --		(6)  DNS
 	 **/
 	private boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address IPv4SrcAddr, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
-		int xid;
-		IPv4Address yiaddr;
-		IPv4Address giaddr;
-		MacAddress chaddr;
-		ArrayList<Byte> requestOrder;/* DHCP Header Info */
-		xid = DHCPPayload.getTransactionId();
-		yiaddr = DHCPPayload.getYourIPAddress();
-		giaddr = DHCPPayload.getGatewayIPAddress();   // Will have GW IP if a relay agent was used
-		chaddr = DHCPPayload.getClientHardwareAddress();
 
+		/* parse dhcp message info */
+		int xid = DHCPPayload.getTransactionId();
+		IPv4Address yiaddr = DHCPPayload.getYourIPAddress();
+		IPv4Address giaddr = DHCPPayload.getGatewayIPAddress();   	// Will have GW IP if a relay agent was used
+		MacAddress chaddr = DHCPPayload.getClientHardwareAddress();
+		ArrayList<Byte> requestOrder = new ArrayList<Byte>();
 		List<DHCPOption> options = DHCPPayload.getOptions();
-		requestOrder = new ArrayList<Byte>();
+
 		for (DHCPOption option : options) {
 			if (option.getCode() == DHCPOptionCode.OptionCode_RequestedIP.getValue()) {
 				desiredIPAddr = IPv4Address.of(option.getData());
@@ -382,6 +356,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			}
 
 		}
+
 
 		// Process DISCOVER message and prepare an OFFER with minimum-hold lease
 		// A HOLD lease should be a small amount of time sufficient for the client to respond
@@ -407,7 +382,10 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			}
 		}
 
-		sendDHCPOffer(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+		OFPacketOut dhcpOfferPacketOut = buildDHCPOfferPacketOut(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+		log.debug("Sending DHCP OFFER");
+		sw.write(dhcpOfferPacketOut);
+
 		return false;
 
 	}
@@ -432,62 +410,59 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --	Option 54 = DHCP DHCPServer IP
 	 * --	Option 6 = DNS servers
 	 **/
-	public void sendDHCPOffer(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
-							  IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+	public OFPacketOut buildDHCPOfferPacketOut(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
+											   IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 
-		OFPacketOut.Builder DHCPOfferPacket = sw.getOFFactory().buildPacketOut();
-		DHCPOfferPacket.setBufferId(OFBufferId.NO_BUFFER);
+		OFPacketOut.Builder dhcpOfferBuilder = sw.getOFFactory().buildPacketOut();
+		dhcpOfferBuilder.setBufferId(OFBufferId.NO_BUFFER);
 
-		Ethernet ethDHCPOffer = new Ethernet();
-		ethDHCPOffer.setSourceMACAddress(instance.getServerMac());
-		ethDHCPOffer.setDestinationMACAddress(chaddr);
-		ethDHCPOffer.setEtherType(EthType.IPv4);
+		Ethernet eth = new Ethernet();
+		eth.setSourceMACAddress(instance.getServerMac());
+		eth.setDestinationMACAddress(chaddr);
+		eth.setEtherType(EthType.IPv4);
 
-		IPv4 ipv4DHCPOffer = new IPv4();
+		IPv4 ipv4 = new IPv4();
 		if (dstIPAddr.equals(IPv4Address.NONE)) {
-			ipv4DHCPOffer.setDestinationAddress(BROADCAST_IP);
+			ipv4.setDestinationAddress(BROADCAST_IP);
 		} else { // Client has IP and dhcpc must have crashed
-			ipv4DHCPOffer.setDestinationAddress(dstIPAddr);
+			ipv4.setDestinationAddress(dstIPAddr);
 		}
-		ipv4DHCPOffer.setSourceAddress(instance.getServerIP());
-		ipv4DHCPOffer.setProtocol(IpProtocol.UDP);
-		ipv4DHCPOffer.setTtl((byte) 64);
+		ipv4.setSourceAddress(instance.getServerIP());
+		ipv4.setProtocol(IpProtocol.UDP);
+		ipv4.setTtl((byte) 64);
 
-		UDP udpDHCPOffer = new UDP();
-		udpDHCPOffer.setDestinationPort(UDP.DHCP_CLIENT_PORT);
-		udpDHCPOffer.setSourcePort(UDP.DHCP_SERVER_PORT);
+		UDP udp = new UDP();
+		udp.setDestinationPort(UDP.DHCP_CLIENT_PORT);
+		udp.setSourcePort(UDP.DHCP_SERVER_PORT);
 
-		DHCP dhcpDHCPOffer = setDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
-
-		ethDHCPOffer.setPayload(ipv4DHCPOffer.setPayload(udpDHCPOffer.setPayload(dhcpDHCPOffer)));
-		DHCPOfferPacket.setInPort(OFPort.ANY);
+		DHCP dhcpOffer = buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
+		eth.setPayload(ipv4.setPayload(udp.setPayload(dhcpOffer)));
+		dhcpOfferBuilder.setInPort(OFPort.ANY);
 
 		List<OFAction> actions = new ArrayList<OFAction>(1);
 		actions.add(sw.getOFFactory().actions().output(inPort, 0xffFFffFF));
-		DHCPOfferPacket.setActions(actions);
+		dhcpOfferBuilder.setActions(actions);
+		dhcpOfferBuilder.setData(eth.serialize());
 
-		DHCPOfferPacket.setData(ethDHCPOffer.serialize());
-
-		log.debug("Sending DHCP OFFER");
-		sw.write(DHCPOfferPacket.build());
+		return dhcpOfferBuilder.build();
 
 	}
 
 
-	private DHCP setDHCPOfferMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
-		DHCP dhcpDHCPOffer = new DHCP();
-		dhcpDHCPOffer.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
-		dhcpDHCPOffer.setHardwareType((byte) 1);
-		dhcpDHCPOffer.setHardwareAddressLength((byte) 6);
-		dhcpDHCPOffer.setHops((byte) 0);
-		dhcpDHCPOffer.setTransactionId(xid);
-		dhcpDHCPOffer.setSeconds((short) 0);
-		dhcpDHCPOffer.setFlags((short) 0);
-		dhcpDHCPOffer.setClientIPAddress(UNASSIGNED_IP);
-		dhcpDHCPOffer.setYourIPAddress(yiaddr);
-		dhcpDHCPOffer.setServerIPAddress(instance.getServerIP());
-		dhcpDHCPOffer.setGatewayIPAddress(giaddr);
-		dhcpDHCPOffer.setClientHardwareAddress(chaddr);
+	public DHCP buildDHCPOfferMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+		DHCP dhcpOffer = new DHCP();
+		dhcpOffer.setOpCode(DHCP.DHCPOpCode.OpCode_Reply.getValue());
+		dhcpOffer.setHardwareType((byte) 1);
+		dhcpOffer.setHardwareAddressLength((byte) 6);
+		dhcpOffer.setHops((byte) 0);
+		dhcpOffer.setTransactionId(xid);
+		dhcpOffer.setSeconds((short) 0);
+		dhcpOffer.setFlags((short) 0);
+		dhcpOffer.setClientIPAddress(UNASSIGNED_IP);
+		dhcpOffer.setYourIPAddress(yiaddr);
+		dhcpOffer.setServerIPAddress(instance.getServerIP());
+		dhcpOffer.setGatewayIPAddress(giaddr);
+		dhcpOffer.setClientHardwareAddress(chaddr);
 
 		List<DHCPOption> dhcpOfferOptions = new ArrayList<DHCPOption>();
 		DHCPOption newOption;
@@ -559,6 +534,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 			} else {
 				log.debug("Setting specific request for OFFER failed");
+
 			}
 
 			dhcpOfferOptions.add(newOption);
@@ -569,8 +545,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		newOption.setLength((byte) 0);
 		dhcpOfferOptions.add(newOption);
 
-		dhcpDHCPOffer.setOptions(dhcpOfferOptions);
-		return dhcpDHCPOffer;
+		dhcpOffer.setOptions(dhcpOfferOptions);
+		return dhcpOffer;
 
 	}
 
@@ -745,7 +721,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 	private DHCP setDHCPAckMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
 		DHCP dhcpDHCPAck = new DHCP();
-		dhcpDHCPAck.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
+		dhcpDHCPAck.setOpCode(DHCP.DHCPOpCode.OpCode_Reply.getValue());
 		dhcpDHCPAck.setHardwareType((byte) 1);
 		dhcpDHCPAck.setHardwareAddressLength((byte) 6);
 		dhcpDHCPAck.setHops((byte) 0);
@@ -879,7 +855,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 	private DHCP getDHCPNAckMessage(DHCPInstance instance, MacAddress chaddr, IPv4Address giaddr, int xid) {
 		DHCP dhcpDHCPOffer = new DHCP();
-		dhcpDHCPOffer.setOpCode(DHCPOpCode.OpCode_Reply.getValue());
+		dhcpDHCPOffer.setOpCode(DHCP.DHCPOpCode.OpCode_Reply.getValue());
 		dhcpDHCPOffer.setHardwareType((byte) 1);
 		dhcpDHCPOffer.setHardwareAddressLength((byte) 6);
 		dhcpDHCPOffer.setHops((byte) 0);
@@ -983,6 +959,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 				log.debug("added option REBIND TIME");
 			}
 		}
+
 		return requestOrder;
 	}
 
@@ -1113,7 +1090,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		DHCP DHCPPayload = (DHCP) UDPPayload.getPayload();
 		log.debug("Got DHCP Packet");
 
-		if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Request.getValue()) {
+
+		if (DHCPPayload.getOpCode() == DHCP.DHCPOpCode.OpCode_Request.getValue()) {
 			if (Arrays.equals(DHCPPayload.getOption(DHCP.DHCPOptionCode.OptionCode_MessageType).getData(), DHCP_MSG_TYPE_DISCOVER)) {
 				log.debug("DHCP DISCOVER Message Received");
 				if (handleDHCPDiscover(sw, inPort, dhcpInstance, IPv4SrcAddr, desiredIPAddr, DHCPPayload))
@@ -1183,7 +1161,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 
 		} // END IF DHCP OPCODE REQUEST
 
-		else if (DHCPPayload.getOpCode() == DHCPOpCode.OpCode_Reply.getValue()) {
+		else if (DHCPPayload.getOpCode() == DHCP.DHCPOpCode.OpCode_Reply.getValue()) {
 			// Do nothing right now. The DHCP DHCPServer isn't supposed to receive replies but ISSUE them instead
 			log.debug("Got an OFFER/ACK (REPLY)...this shouldn't happen unless there's another DHCP Server somewhere");
 

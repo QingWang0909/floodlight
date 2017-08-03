@@ -124,7 +124,29 @@ public class DHCP extends BasePacket {
             return value;
         }
     }
-    
+
+    /**
+     * DHCP messages are either:
+     *		REQUEST (client --0x01--> server)
+     *		or REPLY (server --0x02--> client)
+     */
+	/* Qing Wang enum Code here */
+    public enum DHCPOpCode {
+        OpCode_Request		((byte)1),
+        OpCode_Reply		((byte)2);
+
+        protected byte value;
+
+        private DHCPOpCode(byte value) {
+            this.value = value;
+        }
+
+        public byte getValue(){
+            return value;
+        }
+
+    }
+
     protected byte opCode;
     protected byte hardwareType;
     protected byte hardwareAddressLength;
@@ -555,4 +577,29 @@ public class DHCP extends BasePacket {
         }
         return result;
     }
+
+
+    @Override
+    public String toString() {
+        return "DHCP{" +
+                "opCode=" + opCode +
+                ", hardwareType=" + hardwareType +
+                ", hardwareAddressLength=" + hardwareAddressLength +
+                ", hops=" + hops +
+                ", transactionId=" + transactionId +
+                ", seconds=" + seconds +
+                ", flags=" + flags +
+                ", clientIPAddress=" + clientIPAddress +
+                ", yourIPAddress=" + yourIPAddress +
+                ", serverIPAddress=" + serverIPAddress +
+                ", gatewayIPAddress=" + gatewayIPAddress +
+                ", clientHardwareAddress=" + clientHardwareAddress +
+                ", serverName='" + serverName + '\'' +
+                ", bootFileName='" + bootFileName + '\'' +
+                ", options=" + options +
+                '}';
+
+    }
+
+
 }
