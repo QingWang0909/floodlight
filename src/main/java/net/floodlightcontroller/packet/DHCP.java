@@ -120,7 +120,7 @@ public class DHCP extends BasePacket {
             this.value = value;
         }
         
-        public byte getValue() {
+        public byte getCode() {
             return value;
         }
     }
@@ -130,7 +130,6 @@ public class DHCP extends BasePacket {
      *		REQUEST (client --0x01--> server)
      *		or REPLY (server --0x02--> client)
      */
-	/* Qing Wang enum Code here */
     public enum DHCPOpCode {
         OpCode_Request		((byte)1),
         OpCode_Reply		((byte)2);
@@ -141,7 +140,7 @@ public class DHCP extends BasePacket {
             this.value = value;
         }
 
-        public byte getValue(){
+        public byte getCode(){
             return value;
         }
 

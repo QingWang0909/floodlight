@@ -85,7 +85,7 @@ public class PacketFactory {
         DHCPOption requestOption =
                 new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_RequestedIP.
-                             getValue())
+                            getCode())
                     .setLength((byte)4)
                     .setData(requestValue);
 
@@ -94,7 +94,7 @@ public class PacketFactory {
         DHCPOption msgTypeOption =
                 new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_MessageType.
-                             getValue())
+                            getCode())
                     .setLength((byte)1)
                     .setData(msgTypeValue);
 
@@ -106,7 +106,7 @@ public class PacketFactory {
         DHCPOption reqParamOption =
                 new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_RequestedParameters.
-                             getValue())
+                            getCode())
                     .setLength((byte)4)
                     .setData(reqParamValue);
 
@@ -117,14 +117,14 @@ public class PacketFactory {
         DHCPOption clientIdOption =
                 new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_ClientID.
-                             getValue())
+                            getCode())
                              .setLength((byte)7)
                              .setData(clientIdValue);
 
         DHCPOption endOption =
                 new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_END.
-                             getValue())
+                            getCode())
                              .setLength((byte)0)
                              .setData(null);
 

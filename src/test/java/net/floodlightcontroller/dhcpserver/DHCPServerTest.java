@@ -149,17 +149,17 @@ public class DHCPServerTest extends FloodlightTestCase {
         dhcpPacket.setClientHardwareAddress(MacAddress.FULL_MASK);
 
         // DHCP OpCode
-        dhcpPacket.setOpCode(dhcpOpCode.getValue());
+        dhcpPacket.setOpCode(dhcpOpCode.getCode());
 
         // DHCP Mesasge Type
         DHCPOption option = new DHCPOption();
-        option.setCode(DHCP.DHCPOptionCode.OptionCode_MessageType.getValue());
+        option.setCode(DHCP.DHCPOptionCode.OptionCode_MessageType.getCode());
         option.setData(DHCPServerUtils.intToBytes(dhcpMessageType));
 
 
         // Other DHCP Options
         option = new DHCPOption();
-        option.setCode(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getValue());
+        option.setCode(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
         option.setData(DHCPServerUtils.intToBytes(dhcpMessageType));
 
         dhcpOptions.add(option);
@@ -446,37 +446,59 @@ public class DHCPServerTest extends FloodlightTestCase {
     @Test
     public void testBuildDHCPOfferMessage() throws Exception {
 
-        /* Expected dhcp offer message */
-
-
         /* mock a dhcp packet */
         DHCPInstance instance = dhcpServer.getInstance("myinstance");
         MacAddress chaddr = MacAddress.of("00:11:22:33:44:55");
-        IPv4Address dstIPAddr = IPv4Address.of("1.1.1.1");
         IPv4Address yiaddr = IPv4Address.NONE;
         IPv4Address giaddr = IPv4Address.NONE;
         int xid = 99;
 
         ArrayList<Byte> requestOrder = new ArrayList<Byte>();
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_NTP_IP.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getValue());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getValue());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getCode());
 
+        DHCP dhcpOfferMessage = dhcpServer.buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
 
+        assertNotNull(dhcpOfferMessage);
 
-        DHCP dhcpOffermessage = dhcpServer.buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
-        assertNotNull(dhcpOffermessage);
+        // check if we get expected header info in dhcp offer
+        assertEquals((byte) 2, dhcpOfferMessage.getOpCode());
+        assertEquals((byte) 1, dhcpOfferMessage.getHardwareType());
+        assertEquals((byte) 6, dhcpOfferMessage.getHardwareAddressLength());
+        assertEquals((byte) 0, dhcpOfferMessage.getHops());
+        assertEquals(99, dhcpOfferMessage.getTransactionId());
+        assertEquals((short) 0, dhcpOfferMessage.getSeconds());
+        assertEquals(IPv4Address.FULL_MASK, dhcpOfferMessage.getClientIPAddress());
+        assertEquals(MacAddress.of("00:11:22:33:44:55"), dhcpOfferMessage.getClientHardwareAddress());
+        assertEquals(IPv4Address.of("192.168.56.128"), dhcpOfferMessage.getServerIPAddress());
+        assertEquals(IPv4Address.NONE, dhcpOfferMessage.getYourIPAddress());
+        assertEquals(IPv4Address.NONE, dhcpOfferMessage.getGatewayIPAddress());
+        assertEquals(null, dhcpOfferMessage.getServerName());
 
-        System.out.println(dhcpOffermessage.toString());
+        // check if we get expected options value in dhcp offer
+        assertArrayEquals(instance.getSubnetMask().getBytes(), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_SubnetMask).getData());
+        assertArrayEquals(instance.getRouterIP().getBytes(), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_Router).getData());
+        assertArrayEquals(instance.getServerIP().getBytes(), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp).getData());
+        assertArrayEquals(instance.getDomainName().getBytes(), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_DomainName).getData());
+        assertArrayEquals(instance.getBroadcastIP().getBytes(), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP).getData());
+        assertArrayEquals(DHCPServerUtils.intToBytes(instance.getLeaseTimeSec()), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_LeaseTime).getData());
+        assertArrayEquals(DHCPServerUtils.intToBytes(instance.getRebindTimeSec()), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OPtionCode_RebindingTime).getData());
+        assertArrayEquals(DHCPServerUtils.intToBytes(instance.getRenewalTimeSec()), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_RenewalTime).getData());
+        assertArrayEquals(DHCPServerUtils.intToBytes(instance.getIpforwarding()?1:0), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_IPForwarding).getData());
+        assertArrayEquals(DHCPServerUtils.IPv4ListToByteArr(instance.getDNSServers()), dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_DNS).getData());
 
+        // check un-configured option fields
+        assertNull(dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_NTP_IP));
+        assertNull(dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_ClientID));
+        assertNull(dhcpOfferMessage.getOption(DHCP.DHCPOptionCode.OptionCode_RequestedParameters));
 
     }
 
