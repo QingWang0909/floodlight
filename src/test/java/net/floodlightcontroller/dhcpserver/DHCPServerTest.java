@@ -439,9 +439,44 @@ public class DHCPServerTest extends FloodlightTestCase {
 
     }
 
+    /**
+     * Test if we can build expected dhcp packet-out
+     */
+    @Test
+    public void testBuildDHCPOfferPacketOut() throws Exception {
+
+        /* mock a dhcp packet */
+        DHCPInstance instance = dhcpServer.getInstance("myinstance");
+        MacAddress chaddr = MacAddress.of("00:11:22:33:44:55");
+        IPv4Address dstIPAddr = IPv4Address.of("1.1.1.1");
+        IPv4Address yiaddr = IPv4Address.of("192.168.56.6");
+        IPv4Address giaddr = IPv4Address.of("192.168.56.1");
+        int xid = 99;
+
+        ArrayList<Byte> requestOrder = new ArrayList<Byte>();
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getCode());
+        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getCode());
+
+        OFPacketOut dhcpOfferPacketOut = dhcpServer.buildDHCPOfferPacketOut(instance, sw, OFPort.of(1), chaddr,
+                                        dstIPAddr, yiaddr, giaddr, xid, requestOrder);
+
+
+//        System.out.println(dhcpOfferPacketOut.toString());
+
+
+    }
+
 
     /**
-     * Test if we can build expected dhcp packet
+     * Test if we can build expected dhcp offer message
      */
     @Test
     public void testBuildDHCPOfferMessage() throws Exception {
