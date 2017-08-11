@@ -332,7 +332,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --		(15) Domain Name
 	 * --		(6)  DNS
 	 **/
-	private boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address clientIPAddress, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
+	public boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address clientIPAddress, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
 
 		/* parse dhcp message info */
 		int xid = DHCPPayload.getTransactionId();

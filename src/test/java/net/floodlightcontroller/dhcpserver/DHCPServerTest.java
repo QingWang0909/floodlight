@@ -19,14 +19,10 @@ import net.floodlightcontroller.util.OFMessageUtils;
 import org.easymock.Capture;
 import org.easymock.CaptureType;
 import org.easymock.EasyMock;
-import org.easymock.IMocksControl;
 import org.junit.*;
 import org.projectfloodlight.openflow.protocol.*;
-import org.projectfloodlight.openflow.protocol.action.OFAction;
 import org.projectfloodlight.openflow.protocol.action.OFActionOutput;
-import org.projectfloodlight.openflow.protocol.action.OFActions;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
-import org.projectfloodlight.openflow.protocol.ver13.OFFactoryVer13;
 import org.projectfloodlight.openflow.types.*;
 
 /**
@@ -104,7 +100,6 @@ public class DHCPServerTest extends FloodlightTestCase {
         reset(sw);
         expect(sw.getId()).andReturn(DatapathId.of(testSwitch1DPID)).anyTimes();
         expect(sw.getOFFactory()).andReturn(OFFactories.getFactory(OFVersion.OF_13)).anyTimes();
-        replay(sw);
 
         // Load mock switches to the switch map
         Map<DatapathId, IOFSwitch> switches = new HashMap<DatapathId, IOFSwitch>();
@@ -142,7 +137,7 @@ public class DHCPServerTest extends FloodlightTestCase {
             return dhcpServer.buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
         }
 
-        private static IPacket getDHCPDiscoverMessage() {
+        private static IPacket getDHCPDiscoverPacketEthernet() {
             DHCP discoverPacket = new DHCP();
 
             List<DHCPOption> dhcpOptionList = new ArrayList<DHCPOption>();
@@ -177,7 +172,7 @@ public class DHCPServerTest extends FloodlightTestCase {
             requestParamValue[0] = 1;   // subnet mask
             requestParamValue[1] = 3;   // router
             requestParamValue[2] = 6;   // domain name server
-            requestParamValue[4] = 42;  // NTP server
+            requestParamValue[3] = 42;  // NTP server
             DHCPOption reqParamOption = new DHCPOption()
                     .setCode(DHCP.DHCPOptionCode.OptionCode_RequestedParameters.getCode())
                     .setLength((byte)4)
@@ -452,16 +447,24 @@ public class DHCPServerTest extends FloodlightTestCase {
     @Test
     public void testHandleDhcpDiscover() throws Exception {
 
-        /* create a dhcp discover packet-in message w/ options */
-//        IPacket dhcpDiscoverPacket = getdhcpPacket(DHCP.DHCPOpCode.OpCode_Request, 1);
-//        OFPacketIn discoverPacketIn = createPacketIn(dhcpDiscoverPacket, true);
+        DHCPInstance instance = dhcpServer.getInstance("myinstance");
+        Capture<OFMessage> message1 = new Capture<OFMessage>(CaptureType.ALL);
 
+        /* test if a packet-out OF message can be captured */
+        IPacket dhcpDiscoverEthPacket = DHCPPacketFactory.getDHCPDiscoverPacketEthernet();
+        DHCP dhcpPayload = (DHCP) dhcpDiscoverEthPacket.getPayload().getPayload().getPayload();
+        IPv4Address clientIpAddr = dhcpPayload.getClientIPAddress();
+        IPv4Address desiredIpAddr = dhcpPayload.getYourIPAddress();
 
-        dhcpServer.enableDHCP();
-//        dhcpServer.receive(sw, discoverPacketIn, cntx);
+        expect(sw.write(capture(message1))).andReturn(true).anyTimes();
+        replay(sw);
 
+        // should capture packet-out
+        dhcpServer.handleDHCPDiscover(sw, OFPort.of(1), instance, clientIpAddr, desiredIpAddr, dhcpPayload);
+        verify(sw);
+        assertTrue(message1.hasCaptured());
 
-        /* handle dhcp discover message */
+        /* what's next?? */
 
 
 
