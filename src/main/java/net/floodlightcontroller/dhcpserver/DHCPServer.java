@@ -332,7 +332,7 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --		(15) Domain Name
 	 * --		(6)  DNS
 	 **/
-	private boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address IPv4SrcAddr, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
+	private boolean handleDHCPDiscover(IOFSwitch sw, OFPort inPort, DHCPInstance dhcpInstance, IPv4Address clientIPAddress, IPv4Address desiredIPAddr, DHCP DHCPPayload) {
 
 		/* parse dhcp message info */
 		int xid = DHCPPayload.getTransactionId();
@@ -378,7 +378,10 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 			}
 		}
 
-		OFPacketOut dhcpOfferPacketOut = buildDHCPOfferPacketOut(dhcpInstance, sw, inPort, chaddr, IPv4SrcAddr, yiaddr, giaddr, xid, requestOrder);
+		DHCP dhcpOfferPacket = buildDHCPOfferMessage(dhcpInstance, chaddr, yiaddr, giaddr, xid, requestOrder);
+		//TODO: need client IP address here?
+		OFPacketOut dhcpOfferPacketOut = buildDHCPOfferPacketOut(dhcpInstance, sw, inPort, clientIPAddress, dhcpOfferPacket);
+
 		log.debug("Sending DHCP OFFER");
 		sw.write(dhcpOfferPacketOut);
 
@@ -406,33 +409,27 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 	 * --	Option 54 = DHCP DHCPServer IP
 	 * --	Option 6 = DNS servers
 	 **/
-	public OFPacketOut buildDHCPOfferPacketOut(DHCPInstance instance, IOFSwitch sw, OFPort inPort, MacAddress chaddr, IPv4Address dstIPAddr,
-											   IPv4Address yiaddr, IPv4Address giaddr, int xid, ArrayList<Byte> requestOrder) {
+	public OFPacketOut buildDHCPOfferPacketOut(DHCPInstance instance, IOFSwitch sw, OFPort inPort, IPv4Address clientIPAddress, DHCP dhcpOfferPacket) {
 
-
-
-		DHCP dhcpOffer = buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
-
-		System.out.println(dhcpOffer.toString());
-		if (dstIPAddr.equals(IPv4Address.NONE)) {
-			dstIPAddr = BROADCAST_IP;
+		if (clientIPAddress.equals(IPv4Address.NONE)) {
+			clientIPAddress = BROADCAST_IP;
 		}
 
 		IPacket DHCPOfferReplyEthernet = new Ethernet()
 										.setSourceMACAddress(instance.getServerMac())
-										.setDestinationMACAddress(chaddr)
+										.setDestinationMACAddress(dhcpOfferPacket.getClientHardwareAddress())
 										.setEtherType(EthType.IPv4)
 										.setPayload(
 											new IPv4()
 											.setTtl((byte) 64)
 											.setSourceAddress(instance.getServerIP())
-											.setDestinationAddress(dstIPAddr)
+											.setDestinationAddress(clientIPAddress)
 											.setProtocol(IpProtocol.UDP)
 											.setPayload(
 												new UDP()
 												.setDestinationPort(UDP.DHCP_CLIENT_PORT)
 												.setSourcePort(UDP.DHCP_SERVER_PORT)
-												.setPayload(dhcpOffer)
+												.setPayload(dhcpOfferPacket)
 											)
 
 										);
@@ -561,9 +558,8 @@ public class DHCPServer implements IOFMessageListener, IFloodlightModule, IDHCPS
 		newOption = new DHCPOption()
 				.setCode(DHCPOptionCode.OptionCode_END.getCode())
 				.setLength((byte) 0);
-
-
 		dhcpOfferOptions.add(newOption);
+
 		dhcpOffer.setOptions(dhcpOfferOptions);
 		return dhcpOffer;
 

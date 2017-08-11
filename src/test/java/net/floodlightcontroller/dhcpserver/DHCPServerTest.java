@@ -15,10 +15,18 @@ import static org.junit.Assert.*;
 import static org.easymock.EasyMock.*;
 
 import net.floodlightcontroller.topology.NodePortTuple;
+import net.floodlightcontroller.util.OFMessageUtils;
+import org.easymock.Capture;
+import org.easymock.CaptureType;
 import org.easymock.EasyMock;
+import org.easymock.IMocksControl;
 import org.junit.*;
 import org.projectfloodlight.openflow.protocol.*;
+import org.projectfloodlight.openflow.protocol.action.OFAction;
+import org.projectfloodlight.openflow.protocol.action.OFActionOutput;
+import org.projectfloodlight.openflow.protocol.action.OFActions;
 import org.projectfloodlight.openflow.protocol.match.MatchField;
+import org.projectfloodlight.openflow.protocol.ver13.OFFactoryVer13;
 import org.projectfloodlight.openflow.types.*;
 
 /**
@@ -28,22 +36,22 @@ import org.projectfloodlight.openflow.types.*;
  */
 public class DHCPServerTest extends FloodlightTestCase {
 
-    protected FloodlightContext cntx;
-    protected FloodlightModuleContext fmc;
+    private static FloodlightContext cntx;
+    private static FloodlightModuleContext fmc;
 
-    protected MockThreadPoolService threadPool;
+    private static MockThreadPoolService threadPool;
 
-    protected IOFSwitchService switchService;
-    protected IPacket testPacket;
+    private static IOFSwitchService switchService;
     protected OFPacketIn packetIn;
-    protected IPacket dhcpPacket;
-    protected IPacket dhcpPacketReply;
-    protected IOFSwitch sw;
-    protected byte[] testPktSerialized;
+    private static IPacket dhcpPacket;
+    private static IPacket dhcpPacketReply;
+    private static IOFSwitch sw;
 
-    private DHCPServer dhcpServer;
+    private static DHCPServer dhcpServer;
     private static String testSwitch1DPID = "00:00:00:00:00:00:00:01";
-    private OFFactory factory = OFFactories.getFactory(OFVersion.OF_13);
+    private static OFFactory factory = OFFactories.getFactory(OFVersion.OF_13);
+    private static String broadcastMac = "ff:ff:ff:ff:ff:ff";
+    private static String broadcastIp = "255.255.255.255";
 
 
     /**
@@ -104,137 +112,158 @@ public class DHCPServerTest extends FloodlightTestCase {
         mockSwitchManager.setSwitches(switches);
 
 
-//        /* Build test dhcp packet */
-//        this.dhcpPacket = new Ethernet()
-//                .setSourceMACAddress("00:11:22:33:44:55")
-//                .setDestinationMACAddress("55:66:77:88:99:00")
-//                .setVlanID((short) 24)
-//                .setEtherType(EthType.IPv4)
-//                .setPayload(new IPv4()
-//                        .setSourceAddress("192.168.1.1")
-//                        .setDestinationAddress("192.168.1.100")
-//                        .setPayload(new UDP()
-//                            .setSourcePort((short) 68)
-//                            .setDestinationPort((short) 67)
-//                            .setPayload(new Data(new byte[] {0x01}))
-//                        ));
-//
-//
-//        /* Build mock packet-in */
-//        packetIn = createPacketIn(dhcpPacket, true);
-
-
     }
-
 
     /**
-     * Build a dhcp packet for testing purpose
+     * This class creates many types of packets for dhcp test ( i.e. packet-in/out, dhcp packet, etc )
+     * @author Qing Wang (qw@g.clemson.edu) on 8/8/17.
      */
-    private IPacket getdhcpPacket(DHCP.DHCPOpCode dhcpOpCode, int dhcpMessageType) {
+    private static class DHCPPacketFactory {
 
-        List<DHCPOption> dhcpOptions = new ArrayList<DHCPOption>();
-        DHCP dhcpPacket = new DHCP();
+        private static DHCP getDhcpOfferMessage() {
+            DHCPInstance instance = dhcpServer.getInstance("myinstance");
+            MacAddress chaddr = MacAddress.of("00:11:22:33:44:55");
+            IPv4Address yiaddr = IPv4Address.NONE;
+            IPv4Address giaddr = IPv4Address.NONE;
+            int xid = 99;
 
-        // DHCP header
-        dhcpPacket.setHardwareType((byte) 1);
-        dhcpPacket.setHardwareAddressLength((byte) 6);
-        dhcpPacket.setHops((byte) 0);
-        dhcpPacket.setTransactionId(99);
-        dhcpPacket.setSeconds((short) 0);
-        dhcpPacket.setFlags((short) 0);
-        dhcpPacket.setClientIPAddress(IPv4Address.FULL_MASK); // full mask is all 0's
-        dhcpPacket.setYourIPAddress(IPv4Address.FULL_MASK);
-        dhcpPacket.setServerIPAddress(IPv4Address.FULL_MASK);
-        dhcpPacket.setGatewayIPAddress(IPv4Address.FULL_MASK);
-        dhcpPacket.setClientHardwareAddress(MacAddress.FULL_MASK);
+            ArrayList<Byte> requestOrder = new ArrayList<Byte>();
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getCode());
+            requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getCode());
 
-        // DHCP OpCode
-        dhcpPacket.setOpCode(dhcpOpCode.getCode());
+            return dhcpServer.buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
+        }
 
-        // DHCP Mesasge Type
-        DHCPOption option = new DHCPOption();
-        option.setCode(DHCP.DHCPOptionCode.OptionCode_MessageType.getCode());
-        option.setData(DHCPServerUtils.intToBytes(dhcpMessageType));
+        private static IPacket getDHCPDiscoverMessage() {
+            DHCP discoverPacket = new DHCP();
 
-
-        // Other DHCP Options
-        option = new DHCPOption();
-        option.setCode(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
-        option.setData(DHCPServerUtils.intToBytes(dhcpMessageType));
-
-        dhcpOptions.add(option);
-        dhcpPacket.setOptions(dhcpOptions);
-
-        IPacket packet = new Ethernet()
-                .setSourceMACAddress("00:11:22:33:44:55")
-                .setDestinationMACAddress("55:66:77:88:99:00")
-                .setVlanID((short) 24)
-                .setEtherType(EthType.IPv4)
-                .setPayload(new IPv4()
-                        .setSourceAddress("192.168.1.1")
-                        .setDestinationAddress("192.168.1.100")
-                        .setPayload(
-                                new UDP()
-                                    .setSourcePort((short) 68)
-                                    .setDestinationPort((short) 67)
-                                    .setPayload(dhcpPacket)
-                        ));
+            List<DHCPOption> dhcpOptionList = new ArrayList<DHCPOption>();
+            MacAddress clientMac = MacAddress.of("00:11:22:33:44:55");
+            // DHCP header
+            discoverPacket.setOpCode(DHCP.DHCPOpCode.OpCode_Request.getCode())
+                    .setHardwareType((byte) 1)
+                    .setHardwareAddressLength((byte) 6)
+                    .setHops((byte) 0)
+                    .setTransactionId(99)
+                    .setSeconds((short) 0)
+                    .setFlags((short) 0)
+                    .setClientIPAddress(IPv4Address.FULL_MASK)  // full mask is all 0's
+                    .setYourIPAddress(IPv4Address.FULL_MASK)
+                    .setServerIPAddress(IPv4Address.FULL_MASK)
+                    .setGatewayIPAddress(IPv4Address.FULL_MASK)
+                    .setClientHardwareAddress(clientMac);
 
 
-        return packet;
+            // DHCP Options Setup
+            DHCPOption msgTypeOption = new DHCPOption()
+                    .setCode(DHCP.DHCPOptionCode.OptionCode_MessageType.getCode())
+                    .setLength((byte)1)
+                    .setData(DHCPServerUtils.intToBytes(1));
 
-    }
+            DHCPOption requestIPOption = new DHCPOption()
+                    .setCode(DHCP.DHCPOptionCode.OptionCode_RequestedIP.getCode())
+                    .setLength((byte)4)
+                    .setData(IPAddress.of("192.168.56.10").getBytes());
+
+            byte[] requestParamValue = new byte[4];
+            requestParamValue[0] = 1;   // subnet mask
+            requestParamValue[1] = 3;   // router
+            requestParamValue[2] = 6;   // domain name server
+            requestParamValue[4] = 42;  // NTP server
+            DHCPOption reqParamOption = new DHCPOption()
+                    .setCode(DHCP.DHCPOptionCode.OptionCode_RequestedParameters.getCode())
+                    .setLength((byte)4)
+                    .setData(requestParamValue);
+
+            // client ID traditionaly set to a "hardware type" value followed by "client hardware address"
+            byte[] clientIdValue = new byte[7];
+            clientIdValue[0] = 1;   // Ethernet
+            System.arraycopy(clientMac.getBytes(), 0, clientIdValue, 1, 6);
+            DHCPOption clientIdOption = new DHCPOption()
+                    .setCode(DHCP.DHCPOptionCode.OptionCode_ClientID.getCode())
+                    .setLength((byte)7)
+                    .setData(clientIdValue);
+
+            // End of dhcp options
+            DHCPOption endOption = new DHCPOption()
+                            .setCode(DHCP.DHCPOptionCode.OptionCode_END.getCode())
+                            .setLength((byte)0)
+                            .setData(null);
 
 
-    private OFPacketIn createPacketIn(IPacket testPacket, boolean dhcp) {
-        byte[] testPacketSerialized = testPacket.serialize();
+            dhcpOptionList.add(msgTypeOption);
+            dhcpOptionList.add(requestIPOption);
+            dhcpOptionList.add(reqParamOption);
+            dhcpOptionList.add(clientIdOption);
+            dhcpOptionList.add(endOption);
 
-        OFPacketIn testPacketIn;
-        if (!dhcp) { // do not want dhcp packet-in
-            testPacketIn = factory.buildPacketIn()
-                    .setMatch(factory.buildMatch()
-                            .setExact(MatchField.IN_PORT, OFPort.of(1))
-                            .setExact(MatchField.ETH_SRC, MacAddress.of("00:44:33:22:11:00"))
-                            .setExact(MatchField.ETH_DST, MacAddress.of("00:11:22:33:44:55"))
-                            .setExact(MatchField.ETH_TYPE, EthType.IPv4)
-                            .setExact(MatchField.IPV4_SRC, IPv4Address.of("192.168.1.1"))
-                            .setExact(MatchField.IPV4_DST, IPv4Address.of("192.168.1.2"))
-                            .setExact(MatchField.IP_PROTO, IpProtocol.UDP)
-                            .setExact(MatchField.UDP_SRC, TransportPort.of(5000))
-                            .setExact(MatchField.UDP_DST, TransportPort.of(5001))
-                            .build())
-                    .setBufferId(OFBufferId.NO_BUFFER)
-                    .setData(testPacketSerialized)
-                    .setReason(OFPacketInReason.NO_MATCH)
-                    .build();
+            discoverPacket.setOptions(dhcpOptionList);
 
-        }else { // want dhcp packet-in
-            testPacketIn = factory.buildPacketIn()
-                    .setMatch(factory.buildMatch()
-                            .setExact(MatchField.IN_PORT, OFPort.of(1))
-                            .setExact(MatchField.ETH_SRC, MacAddress.of("00:44:33:22:11:00"))
-                            .setExact(MatchField.ETH_DST, MacAddress.of("00:11:22:33:44:55"))
-                            .setExact(MatchField.ETH_TYPE, EthType.IPv4)
-                            .setExact(MatchField.IPV4_SRC, IPv4Address.of("192.168.1.1"))
-                            .setExact(MatchField.IPV4_DST, IPv4Address.of("192.168.1.2"))
-                            .setExact(MatchField.IP_PROTO, IpProtocol.UDP)
-                            .setExact(MatchField.UDP_SRC, TransportPort.of(68))
-                            .setExact(MatchField.UDP_DST, TransportPort.of(67))
-                            .build())
-                    .setBufferId(OFBufferId.NO_BUFFER)
-                    .setData(testPacketSerialized)
-                    .setReason(OFPacketInReason.NO_MATCH)
-                    .build();
+
+            IPacket dhcpRequestPacket = new Ethernet()
+                    .setSourceMACAddress("00:11:22:33:44:55")
+                    .setDestinationMACAddress(broadcastMac)
+                    .setVlanID((short) 24)
+                    .setEtherType(EthType.IPv4)
+                    .setPayload(new IPv4()
+                            .setTtl((byte) 250)
+                            .setSourceAddress(0)
+                            .setDestinationAddress(broadcastIp)
+                            .setProtocol(IpProtocol.UDP)
+                            .setChecksum((short)0)
+                            .setPayload(
+                                    new UDP()
+                                            .setSourcePort((short) 68)
+                                            .setDestinationPort((short) 67)
+                                            .setChecksum((short) 0)
+                                            .setPayload(discoverPacket)
+                            ));
+
+
+            return dhcpRequestPacket;
 
         }
 
-        // Add this "packet-in" packet (has to be Ethernet packet) to the context store
-        IFloodlightProviderService.bcStore.put(cntx,
-                IFloodlightProviderService.CONTEXT_PI_PAYLOAD,
-                (Ethernet)testPacket);
-        return testPacketIn;
+        private static OFPacketIn createPacketIn(IPacket packet) {
+            byte[] testPacketSerialized = packet.serialize();
+
+            OFPacketIn.Builder packetInBuilder = factory.buildPacketIn();
+            if (factory.getVersion() == OFVersion.OF_10) {
+                packetInBuilder
+                        .setInPort(OFPort.of(1))
+                        .setData(testPacketSerialized)
+                        .setReason(OFPacketInReason.NO_MATCH);
+
+            } else {
+                packetInBuilder
+                        .setMatch(factory.buildMatch().setExact(MatchField.IN_PORT, OFPort.of(1)).build())
+                        .setData(testPacketSerialized)
+                        .setReason(OFPacketInReason.NO_MATCH);
+
+            }
+
+            // Add this "packet-in" packet (has to be Ethernet packet) to the context store
+            IFloodlightProviderService.bcStore.put(cntx,
+                    IFloodlightProviderService.CONTEXT_PI_PAYLOAD,
+                    (Ethernet)packet);
+
+            return packetInBuilder.build();
+
+        }
+
+
 
     }
+
+
 
     /**
      * Test if we get an expected instance based on instance name
@@ -331,7 +360,7 @@ public class DHCPServerTest extends FloodlightTestCase {
         assertEquals(3150, instance.getRebindTimeSec());
         assertEquals(1800, instance.getRenewalTimeSec());
         assertEquals(MacAddress.of("b8:88:e3:0e:05:50"), instance.getServerMac());
-        assertEquals(IPv4Address.of("192.168.56.1"), instance.getServerIP());
+        assertEquals(IPv4Address.of("192.168.56.128"), instance.getServerIP());
         assertEquals(Arrays.asList(IPv4Address.of("108.61.73.242"), IPv4Address.of("108.61.73.243")), instance.getNtpServers());
         assertEquals(new ArrayList<>(), instance.getDNSServers());
         assertEquals(returnStaticAddresses, instance.getStaticAddresseses());
@@ -398,13 +427,13 @@ public class DHCPServerTest extends FloodlightTestCase {
                                         .setDestinationPort((short) 5001)
                                         .setPayload(new Data(new byte[] {0x01}))));
 
-        OFPacketIn testPacketIn1 = createPacketIn(testPacket1, false);
+        OFPacketIn testPacketIn1 = DHCPPacketFactory.createPacketIn(testPacket1);
         assertEquals(IListener.Command.CONTINUE, dhcpServer.receive(sw, testPacketIn1, cntx));
 
-        OFPacketIn testPacketIn2 = createPacketIn(testPacket2, false);
+        OFPacketIn testPacketIn2 = DHCPPacketFactory.createPacketIn(testPacket2);
         assertEquals(IListener.Command.CONTINUE, dhcpServer.receive(sw, testPacketIn2, cntx));
 
-        OFPacketIn testPacketIn3 = createPacketIn(testPacket3, false);
+        OFPacketIn testPacketIn3 = DHCPPacketFactory.createPacketIn(testPacket3);
         assertEquals(IListener.Command.CONTINUE, dhcpServer.receive(sw, testPacketIn3, cntx));
 
 
@@ -417,7 +446,6 @@ public class DHCPServerTest extends FloodlightTestCase {
 
 
 
-
     /**
      * Test if dhcp server can correctly handle dhcp discover message
      */
@@ -425,12 +453,12 @@ public class DHCPServerTest extends FloodlightTestCase {
     public void testHandleDhcpDiscover() throws Exception {
 
         /* create a dhcp discover packet-in message w/ options */
-        IPacket dhcpDiscoverPacket = getdhcpPacket(DHCP.DHCPOpCode.OpCode_Request, 1);
-        OFPacketIn discoverPacketIn = createPacketIn(dhcpDiscoverPacket, true);
+//        IPacket dhcpDiscoverPacket = getdhcpPacket(DHCP.DHCPOpCode.OpCode_Request, 1);
+//        OFPacketIn discoverPacketIn = createPacketIn(dhcpDiscoverPacket, true);
 
 
         dhcpServer.enableDHCP();
-        dhcpServer.receive(sw, discoverPacketIn, cntx);
+//        dhcpServer.receive(sw, discoverPacketIn, cntx);
 
 
         /* handle dhcp discover message */
@@ -440,37 +468,25 @@ public class DHCPServerTest extends FloodlightTestCase {
     }
 
     /**
-     * Test if we can build expected dhcp packet-out
+     * Test if we can build expected output action in dhcp offer packet-out
      */
     @Test
     public void testBuildDHCPOfferPacketOut() throws Exception {
 
-        /* mock a dhcp packet */
         DHCPInstance instance = dhcpServer.getInstance("myinstance");
-        MacAddress chaddr = MacAddress.of("00:11:22:33:44:55");
+        DHCP dhcpOfferMessage = DHCPPacketFactory.getDhcpOfferMessage();
         IPv4Address dstIPAddr = IPv4Address.of("1.1.1.1");
-        IPv4Address yiaddr = IPv4Address.of("192.168.56.6");
-        IPv4Address giaddr = IPv4Address.of("192.168.56.1");
-        int xid = 99;
+        OFPort inPort = OFPort.of(2);
 
-        ArrayList<Byte> requestOrder = new ArrayList<Byte>();
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getCode());
+        OFPacketOut dhcpOfferPacketOut = dhcpServer.buildDHCPOfferPacketOut(instance, sw, inPort,
+                                        dstIPAddr, dhcpOfferMessage);
 
-        OFPacketOut dhcpOfferPacketOut = dhcpServer.buildDHCPOfferPacketOut(instance, sw, OFPort.of(1), chaddr,
-                                        dstIPAddr, yiaddr, giaddr, xid, requestOrder);
+        OFActionOutput output = sw.getOFFactory().actions().buildOutput()
+                .setMaxLen(0xffFFffFF)
+                .setPort(inPort)
+                .build();
 
-
-//        System.out.println(dhcpOfferPacketOut.toString());
-
+        assertEquals(output, dhcpOfferPacketOut.getActions().get(0));
 
     }
 
@@ -481,29 +497,11 @@ public class DHCPServerTest extends FloodlightTestCase {
     @Test
     public void testBuildDHCPOfferMessage() throws Exception {
 
-        /* mock a dhcp packet */
+        /* mock a dhcp offer packet */
         DHCPInstance instance = dhcpServer.getInstance("myinstance");
-        MacAddress chaddr = MacAddress.of("00:11:22:33:44:55");
-        IPv4Address yiaddr = IPv4Address.NONE;
-        IPv4Address giaddr = IPv4Address.NONE;
-        int xid = 99;
-
-        ArrayList<Byte> requestOrder = new ArrayList<Byte>();
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_SubnetMask.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Router.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DomainName.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DNS.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_Broadcast_IP.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_DHCPServerIp.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_LeaseTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OPtionCode_RebindingTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_RenewalTime.getCode());
-        requestOrder.add(DHCP.DHCPOptionCode.OptionCode_IPForwarding.getCode());
-
-        DHCP dhcpOfferMessage = dhcpServer.buildDHCPOfferMessage(instance, chaddr, yiaddr, giaddr, xid, requestOrder);
+        DHCP dhcpOfferMessage = DHCPPacketFactory.getDhcpOfferMessage();
 
         assertNotNull(dhcpOfferMessage);
-
         // check if we get expected header info in dhcp offer
         assertEquals((byte) 2, dhcpOfferMessage.getOpCode());
         assertEquals((byte) 1, dhcpOfferMessage.getHardwareType());
