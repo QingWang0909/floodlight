@@ -235,7 +235,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 	 * The entity classifier currently in use
 	 */
 	protected IEntityClassifierService entityClassifier;
-	
+
 	/**
 	 * Used to cache state about specific entity classes
 	 */
@@ -456,11 +456,11 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
     	if (switchPort == null) {
     		throw new IllegalArgumentException("Switch port cannot be null. Try OFPort.ZERO if intention is 'no port'");
     	}
-		
-		Entity e = new Entity(macAddress, vlan, 
-				ipv4Address, ipv6Address, 
+
+		Entity e = new Entity(macAddress, vlan,
+				ipv4Address, ipv6Address,
 				switchDPID, switchPort, Entity.NO_DATE);
-		
+
 		/*
 		 * allKeyFieldsPresent() will check if the entity key fields (e.g. MAC and VLAN)
 		 * have non-"zero" values i.e. are not set to e.g. MacAddress.NONE and VlanVid.ZERO
@@ -491,7 +491,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
     	if (vlan == null) {
     		throw new IllegalArgumentException("VLAN cannot be null. Try VlanVid.ZERO if intention is 'no VLAN / untagged'");
     	}
-    	
+
 		Entity e = new Entity(macAddress, vlan, ipv4Address, ipv6Address, DatapathId.NONE, OFPort.ZERO, Entity.NO_DATE);
 		if (!allKeyFieldsPresent(e, entityClass.getKeyFields())) {
 			throw new IllegalArgumentException("Not all key fields and/or "
@@ -540,7 +540,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
     	if (switchPort == null) {
     		throw new IllegalArgumentException("Switch port cannot be null. Try OFPort.ZERO if intention is 'no port'");
     	}
-		
+
 		DeviceIndex index = null;
 		if (secondaryIndexMap.size() > 0) {
 			EnumSet<DeviceField> keys =
@@ -602,7 +602,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
     	if (switchPort == null) {
     		throw new IllegalArgumentException("Switch port cannot be null. Try OFPort.ZERO if intention is 'no port'");
     	}
-    	
+
 		ArrayList<Iterator<Device>> iterators =
 				new ArrayList<Iterator<Device>>();
 		ClassState classState = getClassState(entityClass);
@@ -668,7 +668,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
     	if (switchPort == null) {
     		throw new IllegalArgumentException("Switch port cannot be null. Try OFPort.ZERO if intention is 'no port'");
     	}
-		
+
 		DeviceIndex index = null;
 		if (secondaryIndexMap.size() > 0) {
 			EnumSet<DeviceField> keys =
@@ -1083,16 +1083,18 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 		NodePortTuple npt = new NodePortTuple(sw.getId(), inPort);
 		VirtualGatewayInstance instance = null;
 		MacAddress gatewayMac = null;
-		if (gatewayService.getGatewayInstance(npt).isPresent() || gatewayService.getGatewayInstance(sw.getId()).isPresent()) {
-			if (gatewayService.getGatewayInstance(sw.getId()).isPresent()) {
-				instance = gatewayService.getGatewayInstance(sw.getId()).get();
+		if (gatewayService != null) {
+			if (gatewayService.getGatewayInstance(npt).isPresent() || gatewayService.getGatewayInstance(sw.getId()).isPresent()) {
+				if (gatewayService.getGatewayInstance(sw.getId()).isPresent()) {
+					instance = gatewayService.getGatewayInstance(sw.getId()).get();
+				}
+				else {
+					instance = gatewayService.getGatewayInstance(npt).get();
+				}
 			}
 			else {
-				instance = gatewayService.getGatewayInstance(npt).get();
+				logger.info("Could not locate virtual gateway instance for DPID {}, port {}", sw.getId(), inPort);
 			}
-		}
-		else {
-			logger.info("Could not locate virtual gateway instance for DPID {}, port {}", sw.getId(), inPort);
 		}
 
 		if (instance != null) {
@@ -1220,10 +1222,10 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 		}
 		return IPv4Address.NONE;
 	}
-	
+
 	/**
 	 * Get sender IPv6 address from packet if the packet is ND
-	 * 
+	 *
 	 * @param eth
 	 * @param dlAddr
 	 * @return
@@ -1329,7 +1331,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 			IPv6 ipv6 = (IPv6) eth.getPayload();
 			ipv6Dst = ipv6.getDestinationAddress();
 		}
-		
+
 		return new Entity(dlAddr,
 				vlan,
 				ipv4Dst,
@@ -1551,7 +1553,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 				cntPacketOnInternalPortForKnownDevice.increment();
 				break;
 			}
-			
+
 			int entityindex = -1;
 			if ((entityindex = device.entityIndex(entity)) >= 0) {
 				// Entity already exists
@@ -1659,11 +1661,11 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 			changedFields.remove(DeviceField.IPv4);
 		if (newEntity.getIpv6Address().equals(IPv6Address.NONE))
 			changedFields.remove(DeviceField.IPv6);
-		/*if (newEntity.getVlan().equals(VlanVid.ZERO)) TODO VLAN is ZERO here, since the actual Device and Entity must have some sort of VLAN, either untagged (ZERO) or some value 
+		/*if (newEntity.getVlan().equals(VlanVid.ZERO)) TODO VLAN is ZERO here, since the actual Device and Entity must have some sort of VLAN, either untagged (ZERO) or some value
 			changedFields.remove(DeviceField.VLAN);
 		if (newEntity.getSwitchDPID().equals(DatapathId.NONE) ||
 				newEntity.getSwitchPort().equals(OFPort.ZERO))
-			changedFields.remove(DeviceField.SWITCH); 
+			changedFields.remove(DeviceField.SWITCH);
 
 		if (changedFields.size() == 0) return changedFields; */
 
@@ -1688,7 +1690,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 				changedFields.remove(DeviceField.SWITCH);
 			}
 		}
-		
+
 		return changedFields;
 	}
 
@@ -2051,7 +2053,7 @@ public class DeviceManagerImpl implements IDeviceService, IOFMessageListener, IT
 		 return new Device(device, entity, insertionpoint);
 	 }
 
-	 //not used 
+	 //not used
 	 /* TODO then let's get rid of it?
 	 protected Device allocateDevice(Device device, Set <Entity> entities) {
 		 List <AttachmentPoint> newPossibleAPs =
